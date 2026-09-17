@@ -44,6 +44,11 @@ export function previousMonthKey(date = new Date()): string {
   return monthKey(previous.getUTCFullYear(), previous.getUTCMonth() + 1);
 }
 
+export function isActivityReportWindow(date = new Date()): boolean {
+  const local = stockholmClock(date);
+  return local.day >= 1 && local.day <= 14;
+}
+
 export function isScheduledSafetyWindow(date = new Date()): boolean {
   const local = stockholmClock(date);
   return local.day === 14 && local.hour >= 10 && local.hour < 20;
