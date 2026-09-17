@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mapJobTechHit } from "../../../packages/arbetsformedlingen/src/provider";
 import { isHostOrSubdomain } from "../../../packages/core/src/url";
 import {
+  containsExactJobId,
   normalizeStudentConsultingJobUrl,
   normalizeStudentConsultingUrl,
   parseStudentConsultingJobText,
@@ -74,6 +75,12 @@ describe("StudentConsulting parsing", () => {
       location: "Malmö",
       occupation: "Industri / Produktion",
     });
+  });
+
+  it("matches only the exact Jobb-ID during application verification", () => {
+    expect(containsExactJobId("Jobb-ID 87178 Supporttekniker", "87178")).toBe(true);
+    expect(containsExactJobId("Jobb-ID 187178 Supporttekniker", "87178")).toBe(false);
+    expect(containsExactJobId("Butiksmedarbetare", "87178")).toBe(false);
   });
 });
 
