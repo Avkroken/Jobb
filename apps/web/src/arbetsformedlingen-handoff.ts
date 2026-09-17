@@ -4,9 +4,11 @@ import {
   type BrowserWorker,
   type Page,
 } from "@cloudflare/playwright";
+import { isHostOrSubdomain } from "../../../packages/core/src/url";
 
 const MINA_SIDOR_URL =
   "https://arbetsformedlingen.se/for-arbetssokande/mina-sidor";
+const ARBETSFOMEDLINGEN_DOMAIN = "arbetsformedlingen.se";
 const LIVE_VIEW_TTL_MS = 10 * 60 * 1_000;
 
 export interface ArbetsformedlingenHandoff {
@@ -66,7 +68,7 @@ export async function getArbetsformedlingenHandoffStatus(
     const page = context.pages()[0] ?? (await context.newPage());
     return {
       authenticated: await looksAuthenticated(page),
-      currentUrl: page.url(),
+      currentUrl: sanitizeBrowserUrl(page.url()),
     };
   } finally {
     await browser.close();
@@ -92,19 +94,40 @@ export async function refreshArbetsformedlingenLiveView(
 }
 
 async function looksAuthenticated(page: Page): Promise<boolean> {
+  let current: URL;
+  try {
+    current = new URL(page.url());
+  } catch {
+    return false;
+  }
+
+  if (
+    current.protocol !== "https:" ||
+    !isHostOrSubdomain(current.hostname, ARBETSFOMEDLINGEN_DOMAIN)
+  ) {
+    return false;
+  }
+
   const logout = page.getByText(/logga ut/i).first();
   if ((await logout.count()) > 0 && (await logout.isVisible())) return true;
 
   const activityReport = page.getByText(/aktivitetsrapport/i).first();
-  const onArbetsformedlingen = new URL(page.url()).hostname.endsWith(
-    "arbetsformedlingen.se",
-  );
-
   return (
-    onArbetsformedlingen &&
     (await activityReport.count()) > 0 &&
     (await activityReport.isVisible())
   );
+}
+
+function sanitizeBrowserUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return parsed.protocol;
+    }
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return "invalid:";
+  }
 }
 
 async function getLiveViewUrl(page: Page, expiresInMs: number): Promise<string> {
