@@ -131,7 +131,8 @@ export async function executeAutomation(
     await updateRun(env.DB, runId, { verifiedCount });
 
     if (verifiedCount < MONTHLY_APPLICATION_TARGET) {
-      const message = applicationResult.error ??
+      const message =
+        applicationResult.error ??
         `Only ${verifiedCount}/${MONTHLY_APPLICATION_TARGET} verified suitable applications are available.`;
       await updateRun(env.DB, runId, {
         status: "failed",
@@ -161,7 +162,8 @@ export async function executeAutomation(
       applicationMonth,
       reportMonth,
       verifiedCount,
-      message: "Current-month application target reached. Activity reporting is only opened between the 1st and 14th.",
+      message:
+        "Current-month application target reached. Activity reporting is only opened between the 1st and 14th.",
     };
   }
 
@@ -243,7 +245,8 @@ export async function executeAutomation(
     applicationMonth,
     reportMonth,
     verifiedCount,
-    message: "BankID authentication is required before the activity report can continue.",
+    message:
+      "BankID authentication is required before the activity report can continue.",
   };
 }
 
@@ -256,14 +259,16 @@ async function fillMonthlyApplicationTarget(
   if (!suitabilityConfigured(env)) {
     return {
       verifiedCount: startingVerifiedCount,
-      error: "Suitability policy is not configured. Set JOB_INCLUDE_TERMS before enabling autonomous applications.",
+      error:
+        "Suitability policy is not configured. Set JOB_INCLUDE_TERMS before enabling autonomous applications.",
     };
   }
 
   if (env.STUDENTCONSULTING_AUTOSUBMIT !== "true") {
     return {
       verifiedCount: startingVerifiedCount,
-      error: "StudentConsulting autosubmit is disabled. Set STUDENTCONSULTING_AUTOSUBMIT=true after validating account configuration.",
+      error:
+        "StudentConsulting autosubmit is disabled. Set STUDENTCONSULTING_AUTOSUBMIT=true after validating account configuration.",
     };
   }
 
@@ -299,6 +304,22 @@ async function fillMonthlyApplicationTarget(
         runId,
         reportMonth: applicationMonth,
       });
+
+      const claim = await env.DB
+        .prepare(
+          `SELECT automation_run_id, status
+           FROM applications WHERE id = ?`,
+        )
+        .bind(applicationId)
+        .first<{ automation_run_id: string | null; status: string }>();
+      if (
+        !claim ||
+        claim.automation_run_id !== runId ||
+        claim.status !== "queued"
+      ) {
+        continue;
+      }
+
       await setApplicationStatus(env.DB, applicationId, "applying");
 
       const attemptNo = await nextAttemptNumber(env.DB, applicationId);
@@ -313,7 +334,9 @@ async function fillMonthlyApplicationTarget(
             env.DB,
             attemptId,
             result.status === "failed" ? "failed" : "unknown",
-            result.status === "failed" ? "APPLICATION_FAILED" : "APPLICATION_UNKNOWN",
+            result.status === "failed"
+              ? "APPLICATION_FAILED"
+              : "APPLICATION_UNKNOWN",
             result.error,
           );
           await setApplicationStatus(
@@ -337,9 +360,12 @@ async function fillMonthlyApplicationTarget(
             "VERIFICATION_FAILED",
             "StudentConsulting did not show the exact Jobb-ID in Ansökningar.",
           );
-          await setApplicationStatus(env.DB, applicationId, "needs_user_action", {
-            appliedAt,
-          });
+          await setApplicationStatus(
+            env.DB,
+            applicationId,
+            "needs_user_action",
+            { appliedAt },
+          );
           continue;
         }
 
@@ -357,7 +383,8 @@ async function fillMonthlyApplicationTarget(
             job,
             appliedAt,
             verifiedAt,
-            verification: "StudentConsulting Ansökningar exact Jobb-ID match",
+            verification:
+              "StudentConsulting Ansökningar exact Jobb-ID match",
           }),
           { httpMetadata: { contentType: "application/json" } },
         );
