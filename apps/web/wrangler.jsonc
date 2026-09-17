@@ -19,8 +19,10 @@
     {
       "name": "jobb-automation",
       "binding": "JOB_AUTOMATION",
-      "class_name": "JobAutomationWorkflow",
-      "schedules": ["0 8-19 14 * *"]
+      "class_name": "JobAutomationWorkflow"
     }
-  ]
+  ],
+  "triggers": {
+    "crons": ["0 8-19 14 * *"]
+  }
 }
