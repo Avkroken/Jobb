@@ -25,7 +25,9 @@ export interface ArbetsformedlingenHandoffStatus {
 export async function startArbetsformedlingenHandoff(
   binding: BrowserWorker,
 ): Promise<ArbetsformedlingenHandoff> {
-  const { sessionId } = await acquire(binding);
+  const { sessionId } = await acquire(binding, {
+    keep_alive: LIVE_VIEW_TTL_MS,
+  });
   const browser = await connect(binding, sessionId);
 
   try {
@@ -108,14 +110,10 @@ async function looksAuthenticated(page: Page): Promise<boolean> {
     return false;
   }
 
+  // A visible account-only logout control is stronger evidence than public
+  // activity-report text, which can also exist before authentication.
   const logout = page.getByText(/logga ut/i).first();
-  if ((await logout.count()) > 0 && (await logout.isVisible())) return true;
-
-  const activityReport = page.getByText(/aktivitetsrapport/i).first();
-  return (
-    (await activityReport.count()) > 0 &&
-    (await activityReport.isVisible())
-  );
+  return (await logout.count()) > 0 && (await logout.isVisible());
 }
 
 function sanitizeBrowserUrl(value: string): string {
