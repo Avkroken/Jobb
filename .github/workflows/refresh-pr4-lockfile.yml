@@ -1,0 +1,35 @@
+name: Refresh PR4 lockfile
+
+on:
+  push:
+    branches:
+      - codex/add-pnpm-lockfile-to-repository/2026-09-17/09-10-54
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: corepack enable
+      - name: Upgrade Vitest to patched version and refresh lockfile
+        run: pnpm --filter @avkroken/web add -D 'vitest@^4.1.11'
+      - name: Commit refreshed dependency graph
+        shell: bash
+        run: |
+          if git diff --quiet -- apps/web/package.json pnpm-lock.yaml; then
+            echo 'No dependency changes required.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/web/package.json pnpm-lock.yaml
+          git commit -m 'fix: upgrade Vitest past GHSA-82fw-gwwq-j7x9'
+          git push
