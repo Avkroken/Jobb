@@ -1,6 +1,60 @@
 import { describe, expect, it } from "vitest";
 import { mapJobTechHit } from "../../../packages/arbetsformedlingen/src/provider";
-import { parseStudentConsultingJobText } from "../../../packages/studentconsulting/src/provider";
+import { isHostOrSubdomain } from "../../../packages/core/src/url";
+import {
+  normalizeStudentConsultingJobUrl,
+  normalizeStudentConsultingUrl,
+  parseStudentConsultingJobText,
+} from "../../../packages/studentconsulting/src/provider";
+
+describe("trusted URL validation", () => {
+  it("accepts exact domains and real subdomains but rejects lookalikes", () => {
+    expect(isHostOrSubdomain("studentconsulting.com", "studentconsulting.com")).toBe(true);
+    expect(isHostOrSubdomain("id.studentconsulting.com", "studentconsulting.com")).toBe(true);
+    expect(isHostOrSubdomain("evilstudentconsulting.com", "studentconsulting.com")).toBe(false);
+    expect(isHostOrSubdomain("studentconsulting.com.evil.test", "studentconsulting.com")).toBe(false);
+  });
+
+  it("canonicalizes StudentConsulting URLs onto the trusted origin", () => {
+    expect(
+      normalizeStudentConsultingUrl(
+        "https://www.studentconsulting.com/sv/lediga-jobb/?page=2",
+      ),
+    ).toBe("https://www.studentconsulting.com/sv/lediga-jobb/?page=2");
+
+    expect(
+      normalizeStudentConsultingUrl(
+        "https://id.studentconsulting.com/sv/lediga-jobb/?page=2",
+      ),
+    ).toBe("https://www.studentconsulting.com/sv/lediga-jobb/?page=2");
+
+    expect(
+      normalizeStudentConsultingUrl(
+        "https://studentconsulting.com.evil.test/sv/lediga-jobb/",
+      ),
+    ).toBeNull();
+  });
+
+  it("only accepts StudentConsulting job-detail paths", () => {
+    expect(
+      normalizeStudentConsultingJobUrl(
+        "https://www.studentconsulting.com/sv/lediga-jobb/stockholm/supporttekniker/87178/",
+      ),
+    ).toBe(
+      "https://www.studentconsulting.com/sv/lediga-jobb/stockholm/supporttekniker/87178/",
+    );
+    expect(
+      normalizeStudentConsultingJobUrl(
+        "https://www.studentconsulting.com/sv/lediga-jobb/",
+      ),
+    ).toBeNull();
+    expect(
+      normalizeStudentConsultingJobUrl(
+        "https://evil.test/sv/lediga-jobb/stockholm/supporttekniker/87178/",
+      ),
+    ).toBeNull();
+  });
+});
 
 describe("StudentConsulting parsing", () => {
   it("extracts job id, location and occupation from the facts section", () => {
