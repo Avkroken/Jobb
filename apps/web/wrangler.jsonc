@@ -11,5 +11,18 @@
   ],
   "r2_buckets": [
     { "binding": "EVIDENCE", "bucket_name": "jobb-evidence" }
-  ]
+  ],
+  "send_email": [
+    { "name": "EMAIL" }
+  ],
+  "workflows": [
+    {
+      "name": "jobb-automation",
+      "binding": "JOB_AUTOMATION",
+      "class_name": "JobAutomationWorkflow"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 8-19 14 * *"]
+  }
 }
