@@ -7,6 +7,7 @@ import {
 } from "./automation-workflow";
 import { getDashboardData, renderDashboard } from "./dashboard";
 import type { EmailBinding } from "./notifier";
+import { getLatestIntegrationProbe } from "./probe-storage";
 import { captureAndPersistActivityReportProbe } from "./probe-service";
 import { createArbetsformedlingenProvider } from "./providers";
 import type { AutomationEnv } from "./runner";
@@ -90,6 +91,23 @@ export default {
       }
 
       try {
+        const existingProbe = await getLatestIntegrationProbe(env.DB, runId);
+        if (existingProbe?.status === "captured") {
+          return Response.json({
+            authenticated: true,
+            runId,
+            probe: {
+              probeId: existingProbe.id,
+              status: "captured",
+              pageUrl: existingProbe.page_url,
+              summary: existingProbe.summary_json
+                ? JSON.parse(existingProbe.summary_json)
+                : null,
+            },
+            message: "BankID och aktivitetsrapportens formulärschema är redan verifierade.",
+          });
+        }
+
         const status = await getArbetsformedlingenHandoffStatus(
           env.BROWSER,
           run.auth_session_id,
