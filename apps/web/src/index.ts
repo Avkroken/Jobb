@@ -7,6 +7,7 @@ import {
 } from "./automation-workflow";
 import { getDashboardData, renderDashboard } from "./dashboard";
 import type { EmailBinding } from "./notifier";
+import { captureAndPersistActivityReportProbe } from "./probe-service";
 import { createArbetsformedlingenProvider } from "./providers";
 import type { AutomationEnv } from "./runner";
 import { getRun, scheduledRunId } from "./storage";
@@ -38,21 +39,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/health") {
-      return Response.json({
-        status: "ok",
-        targetApplicationsPerMonth: 10,
-        automaticSafetyRun: "14:e, 10:00–20:00 Europe/Stockholm",
-        studentConsultingConfigured: Boolean(
-          env.STUDENTCONSULTING_EMAIL && env.STUDENTCONSULTING_PASSWORD,
-        ),
-        studentConsultingAutoSubmit:
-          env.STUDENTCONSULTING_AUTOSUBMIT === "true",
-        suitabilityConfigured: Boolean(env.JOB_INCLUDE_TERMS?.trim()),
-        bankIdNotificationConfigured: Boolean(
-          (env.EMAIL && env.NOTIFY_EMAIL_TO && env.NOTIFY_EMAIL_FROM) ||
-            env.NOTIFY_WEBHOOK_URL,
-        ),
-      });
+      return Response.json({ status: "ok" });
     }
 
     const authFailure = requireDashboardAuth(request, env);
@@ -107,12 +94,27 @@ export default {
           env.BROWSER,
           run.auth_session_id,
         );
+        if (!status.authenticated) {
+          return Response.json({
+            ...status,
+            runId,
+            message: "BankID-inloggningen är inte verifierad ännu.",
+          });
+        }
+
+        const probe = await captureAndPersistActivityReportProbe(
+          env,
+          runId,
+          run.auth_session_id,
+        );
         return Response.json({
           ...status,
           runId,
-          message: status.authenticated
-            ? "BankID-inloggningen är verifierad. Nästa steg är aktivitetsrapportens formuläradapter."
-            : "BankID-inloggningen är inte verifierad ännu.",
+          probe,
+          message:
+            probe.status === "captured"
+              ? "BankID är verifierat och aktivitetsrapportens formulärschema är kartlagt utan fältvärden."
+              : "BankID är verifierat men formulärproben misslyckades.",
         });
       } catch (error) {
         return jsonError(error, 502);
