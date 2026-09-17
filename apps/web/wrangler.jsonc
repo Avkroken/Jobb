@@ -1,0 +1,14 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "jobb",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-17",
+  "upload_source_maps": true,
+  "browser": { "binding": "BROWSER" },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "jobb" }
+  ],
+  "r2_buckets": [
+    { "binding": "EVIDENCE", "bucket_name": "jobb-evidence" }
+  ]
+}
