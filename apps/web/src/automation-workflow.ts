@@ -4,6 +4,7 @@ import {
   type WorkflowStep,
 } from "cloudflare:workers";
 import { executeAutomation, type AutomationEnv } from "./runner";
+import { updateRun } from "./storage";
 
 export interface AutomationWorkflowParams {
   mode?: "manual" | "scheduled";
@@ -25,7 +26,7 @@ export class JobAutomationWorkflow extends WorkflowEntrypoint<
       triggeredAt: event.payload?.triggeredAt ?? event.timestamp.toISOString(),
     }));
 
-    return step.do(
+    const result = await step.do(
       "execute application automation",
       {
         retries: { limit: 0, delay: "1 second" },
@@ -38,5 +39,15 @@ export class JobAutomationWorkflow extends WorkflowEntrypoint<
           now: new Date(trigger.triggeredAt),
         }),
     );
+
+    if (result.status !== "skipped") {
+      await step.do("link workflow instance", async () => {
+        await updateRun(this.env.DB, result.runId, {
+          workflowInstanceId: event.instanceId,
+        });
+      });
+    }
+
+    return result;
   }
 }
