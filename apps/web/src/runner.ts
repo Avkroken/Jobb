@@ -8,6 +8,12 @@ import {
 } from "./policy";
 import { withStudentConsultingProvider, type ProviderEnv } from "./providers";
 import {
+  claimMonthlyApplicationSlot,
+  countOccupiedMonthlyApplicationSlots,
+  releaseMonthlyApplicationSlot,
+  setMonthlyApplicationSlotState,
+} from "./quota";
+import {
   addEvidence,
   countVerifiedApplications,
   createApplication,
@@ -29,6 +35,7 @@ import {
 import {
   currentMonthKey,
   isActivityReportWindow,
+  isApplicationAutomationWindow,
   isScheduledSafetyWindow,
   previousMonthKey,
 } from "./time";
@@ -58,6 +65,22 @@ export async function executeAutomation(
   const applicationMonth = currentMonthKey(now);
   const reportMonth = previousMonthKey(now);
 
+  if (!isApplicationAutomationWindow(now)) {
+    return {
+      runId:
+        input.runId ??
+        (input.mode === "scheduled"
+          ? scheduledRunId(applicationMonth)
+          : `manual:${applicationMonth}:${crypto.randomUUID()}`),
+      status: "skipped",
+      applicationMonth,
+      reportMonth,
+      verifiedCount: await countVerifiedApplications(env.DB, applicationMonth),
+      message:
+        "Job application automation is disabled outside the 1st–14th Europe/Stockholm monthly window.",
+    };
+  }
+
   if (input.mode === "scheduled" && !isScheduledSafetyWindow(now)) {
     return {
       runId: input.runId ?? scheduledRunId(applicationMonth),
@@ -65,7 +88,8 @@ export async function executeAutomation(
       applicationMonth,
       reportMonth,
       verifiedCount: await countVerifiedApplications(env.DB, applicationMonth),
-      message: "Outside the 14th 10:00–20:00 Europe/Stockholm safety window.",
+      message:
+        "Outside the autonomous fallback window: 10th–13th, 10:00–20:00 Europe/Stockholm.",
     };
   }
 
@@ -131,9 +155,13 @@ export async function executeAutomation(
     await updateRun(env.DB, runId, { verifiedCount });
 
     if (verifiedCount < MONTHLY_APPLICATION_TARGET) {
+      const occupiedSlots = await countOccupiedMonthlyApplicationSlots(
+        env.DB,
+        applicationMonth,
+      );
       const message =
         applicationResult.error ??
-        `Only ${verifiedCount}/${MONTHLY_APPLICATION_TARGET} verified suitable applications are available.`;
+        `Only ${verifiedCount}/${MONTHLY_APPLICATION_TARGET} verified applications are available; ${occupiedSlots}/${MONTHLY_APPLICATION_TARGET} quota slots are occupied.`;
       await updateRun(env.DB, runId, {
         status: "failed",
         lastError: message,
@@ -192,7 +220,7 @@ export async function executeAutomation(
   if (reportableCount < MONTHLY_APPLICATION_TARGET) {
     const message =
       `Previous month ${reportMonth} has only ${reportableCount}/${MONTHLY_APPLICATION_TARGET} verified applications. ` +
-      "Applications made now cannot legally be backdated into the previous month.";
+      "Applications made now cannot be backdated into the previous month.";
     await setReportStatus(env.DB, reportMonth, "failed", message);
     await updateRun(env.DB, runId, {
       status: "failed",
@@ -223,11 +251,7 @@ export async function executeAutomation(
     lastNotifiedAt: new Date().toISOString(),
   });
 
-  const notifications = await notifyBankIdRequired(
-    env,
-    runId,
-    handoff.expiresAt,
-  );
+  const notifications = await notifyBankIdRequired(env, runId, handoff.expiresAt);
   for (const notification of notifications) {
     await recordNotification(env.DB, {
       id: crypto.randomUUID(),
@@ -272,6 +296,22 @@ async function fillMonthlyApplicationTarget(
     };
   }
 
+  const occupiedBefore = await countOccupiedMonthlyApplicationSlots(
+    env.DB,
+    applicationMonth,
+  );
+  if (
+    occupiedBefore >= MONTHLY_APPLICATION_TARGET &&
+    startingVerifiedCount < MONTHLY_APPLICATION_TARGET
+  ) {
+    return {
+      verifiedCount: startingVerifiedCount,
+      error:
+        `All ${MONTHLY_APPLICATION_TARGET} monthly application slots are already occupied, but only ${startingVerifiedCount} are verified. ` +
+        "Resolve submitted/uncertain applications before any further application can be sent.",
+    };
+  }
+
   return withStudentConsultingProvider(env, async (provider) => {
     const auth = await provider.authenticate();
     if (auth.status !== "authenticated") {
@@ -292,40 +332,57 @@ async function fillMonthlyApplicationTarget(
 
     for (const job of suitable) {
       if (verifiedCount >= MONTHLY_APPLICATION_TARGET) break;
+      if (
+        (await countOccupiedMonthlyApplicationSlots(env.DB, applicationMonth)) >=
+        MONTHLY_APPLICATION_TARGET
+      ) {
+        break;
+      }
       if (await hasApplicationForJob(env.DB, job.provider, job.externalId)) {
         continue;
       }
 
-      const jobId = await persistJob(env.DB, job);
       const applicationId = `application:${job.provider}:${job.externalId}`;
-      await createApplication(env.DB, {
-        id: applicationId,
-        jobId,
-        runId,
-        reportMonth: applicationMonth,
-      });
+      const quotaClaim = await claimMonthlyApplicationSlot(
+        env.DB,
+        applicationMonth,
+        applicationId,
+      );
+      if (!quotaClaim) break;
 
-      const claim = await env.DB
-        .prepare(
-          `SELECT automation_run_id, status
-           FROM applications WHERE id = ?`,
-        )
-        .bind(applicationId)
-        .first<{ automation_run_id: string | null; status: string }>();
-      if (
-        !claim ||
-        claim.automation_run_id !== runId ||
-        claim.status !== "queued"
-      ) {
-        continue;
-      }
-
-      await setApplicationStatus(env.DB, applicationId, "applying");
-
-      const attemptNo = await nextAttemptNumber(env.DB, applicationId);
-      const attemptId = await startAttempt(env.DB, applicationId, attemptNo);
+      let attemptId: string | undefined;
+      let submitStarted = false;
 
       try {
+        const jobId = await persistJob(env.DB, job);
+        await createApplication(env.DB, {
+          id: applicationId,
+          jobId,
+          runId,
+          reportMonth: applicationMonth,
+        });
+
+        const claim = await env.DB
+          .prepare(
+            `SELECT automation_run_id, status
+             FROM applications WHERE id = ?`,
+          )
+          .bind(applicationId)
+          .first<{ automation_run_id: string | null; status: string }>();
+        if (
+          !claim ||
+          claim.automation_run_id !== runId ||
+          claim.status !== "queued"
+        ) {
+          await releaseMonthlyApplicationSlot(env.DB, applicationId);
+          continue;
+        }
+
+        await setApplicationStatus(env.DB, applicationId, "applying");
+
+        const attemptNo = await nextAttemptNumber(env.DB, applicationId);
+        attemptId = await startAttempt(env.DB, applicationId, attemptNo);
+        submitStarted = true;
         const result = await provider.apply(job);
         const appliedAt = new Date().toISOString();
 
@@ -344,9 +401,19 @@ async function fillMonthlyApplicationTarget(
             applicationId,
             result.status === "failed" ? "failed" : "needs_user_action",
           );
+          if (result.status === "failed") {
+            await releaseMonthlyApplicationSlot(env.DB, applicationId);
+          } else {
+            await setMonthlyApplicationSlotState(
+              env.DB,
+              applicationId,
+              "uncertain",
+            );
+          }
           continue;
         }
 
+        await setMonthlyApplicationSlotState(env.DB, applicationId, "submitted");
         await setApplicationStatus(env.DB, applicationId, "submitted", {
           appliedAt,
         });
@@ -371,6 +438,7 @@ async function fillMonthlyApplicationTarget(
 
         const verifiedAt = new Date().toISOString();
         await finishAttempt(env.DB, attemptId, "verified");
+        await setMonthlyApplicationSlotState(env.DB, applicationId, "verified");
         await setApplicationStatus(env.DB, applicationId, "verified", {
           appliedAt,
           verifiedAt,
@@ -399,22 +467,39 @@ async function fillMonthlyApplicationTarget(
         await updateRun(env.DB, runId, { verifiedCount });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await finishAttempt(
-          env.DB,
-          attemptId,
-          "failed",
-          "UNEXPECTED_APPLICATION_ERROR",
-          message,
-        );
-        await setApplicationStatus(env.DB, applicationId, "failed");
+        if (attemptId) {
+          await finishAttempt(
+            env.DB,
+            attemptId,
+            "failed",
+            "UNEXPECTED_APPLICATION_ERROR",
+            message,
+          );
+        }
+        if (submitStarted) {
+          await setMonthlyApplicationSlotState(
+            env.DB,
+            applicationId,
+            "uncertain",
+          );
+          await setApplicationStatus(env.DB, applicationId, "needs_user_action");
+        } else {
+          await releaseMonthlyApplicationSlot(env.DB, applicationId);
+        }
       }
     }
 
+    const occupied = await countOccupiedMonthlyApplicationSlots(
+      env.DB,
+      applicationMonth,
+    );
     return {
       verifiedCount,
       error:
         verifiedCount < MONTHLY_APPLICATION_TARGET
-          ? `Only ${verifiedCount}/${MONTHLY_APPLICATION_TARGET} suitable verified applications could be completed from the current StudentConsulting listings.`
+          ? occupied >= MONTHLY_APPLICATION_TARGET
+            ? `${occupied}/${MONTHLY_APPLICATION_TARGET} monthly slots are occupied, but only ${verifiedCount} are verified. Resolve uncertain submissions; no additional applications will be sent.`
+            : `Only ${verifiedCount}/${MONTHLY_APPLICATION_TARGET} suitable verified applications could be completed from the current StudentConsulting listings.`
           : undefined,
     };
   });
