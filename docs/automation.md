@@ -4,23 +4,46 @@
 
 ## Manual mode
 
-The protected dashboard exposes **Kör nu**. It starts a Cloudflare Workflow and immediately returns control to the browser. Progress, failures, completed applications, and BankID handoff state are persisted in D1 and displayed by the dashboard.
+The protected dashboard exposes **Kör nu** only during the active application window, the **1st–14th** of each calendar month in `Europe/Stockholm`. Outside that window the UI disables the action and the API rejects manual runs.
+
+The button starts a Cloudflare Workflow and immediately returns control to the browser. Progress, failures, completed applications, and BankID handoff state are persisted in D1 and displayed by the dashboard.
 
 ## Automatic safety mode
 
-Cloudflare Cron invokes the Worker hourly on the 14th using a broad UTC interval. The Worker then validates the time against `Europe/Stockholm` and only starts an automation run between **10:00 and 20:00 local time**.
+The low-traffic fallback runs **once per day on the 10th–13th**. Cloudflare Cron invokes the Worker at `09:00 UTC`, which is 10:00 CET or 11:00 CEST, safely inside the requested **10:00–20:00 Europe/Stockholm** window.
 
-The scheduled D1 run key is stable for the month (`scheduled:YYYY-MM`). This makes repeated Cron invocations converge on the same monthly run rather than creating a new logical run each hour.
+The 10th is the normal autonomous attempt. The 11th–13th are retries only when the stable monthly run (`scheduled:YYYY-MM`) is still `failed`. Completed, running, or BankID-waiting monthly runs are not restarted. There is no autonomous job-search traffic on the 14th or the 15th–end of month.
 
 A scheduled run:
 
 1. Counts already verified applications for the current calendar month.
-2. Applies only to configured suitable StudentConsulting jobs until the monthly target of 10 is reached.
-3. Never counts an application until the exact StudentConsulting Jobb-ID is verified in `Ansökningar`.
-4. During the 1st–14th reporting window, prepares the previous calendar month's activity report and starts the user-controlled BankID handoff.
-5. Sends a notification when BankID is required.
+2. Applies only to configured suitable StudentConsulting jobs.
+3. Uses exactly ten D1 quota slots for the month; an 11th automatic submission cannot acquire a slot.
+4. Never counts an application as verified until the exact StudentConsulting Jobb-ID is visible in `Ansökningar`.
+5. During the 1st–14th reporting window, prepares the previous calendar month's activity report and starts the user-controlled BankID handoff.
+6. Sends a notification when BankID is required.
 
-Applications made on the 14th belong to the current month. They are **not** backdated into the previous month's activity report. If the previous month does not already contain the required verified applications, the report is marked failed for manual review instead of fabricating activity dates.
+## Exact monthly quota
+
+`migrations/0004_monthly_application_quota.sql` creates ten slots for each month. A slot is reserved **before** StudentConsulting submission starts.
+
+- A definitely failed submission releases its reservation.
+- A confirmed submission keeps its slot.
+- A verified submission marks its slot verified.
+- An ambiguous/unknown result keeps the slot as `uncertain` rather than allowing a replacement application that could accidentally become number 11.
+
+This is deliberately fail-closed: the automation will never knowingly submit more than ten jobs in a calendar month. If an external site leaves the result ambiguous, the dashboard reports the problem and blocks additional submissions until it is resolved.
+
+## Error diagnostics
+
+Application attempts persist a machine-readable `error_code` plus the provider's error message. The dashboard renders the failure stage and reason, for example:
+
+- `APPLICATION_FAILED` — StudentConsulting rejected or failed the application.
+- `APPLICATION_UNKNOWN` — submission outcome could not be determined safely.
+- `VERIFICATION_FAILED` — submission was reported, but the exact Jobb-ID was not found in `Ansökningar`.
+- `UNEXPECTED_APPLICATION_ERROR` — browser/provider automation raised an unexpected error.
+
+Run-level and Arbetsförmedlingen probe errors are also persisted and shown separately.
 
 ## Required runtime secrets/configuration
 
@@ -86,8 +109,11 @@ Apply migrations in order:
 migrations/0001_initial.sql
 migrations/0002_automation.sql
 migrations/0003_integration_probes.sql
+migrations/0004_monthly_application_quota.sql
 ```
 
 `0002_automation.sql` adds workflow/run state, notification history, BankID handoff metadata, and links applications to their automation run.
 
 `0003_integration_probes.sql` stores metadata for sanitized authenticated integration probes. Full probe documents are kept in the private R2 evidence bucket.
+
+`0004_monthly_application_quota.sql` enforces the ten-slot monthly submission ceiling.
