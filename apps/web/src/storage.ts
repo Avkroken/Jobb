@@ -11,6 +11,7 @@ export interface AutomationRunRow {
   status: RunStatus;
   target_count: number;
   verified_count: number;
+  workflow_instance_id: string | null;
   auth_session_id: string | null;
   auth_live_view_url: string | null;
   auth_expires_at: string | null;
@@ -33,13 +34,14 @@ export async function createRun(
     applicationMonth: string;
     reportMonth: string;
     targetCount: number;
+    workflowInstanceId?: string;
   },
 ): Promise<AutomationRunRow> {
   await db
     .prepare(
       `INSERT OR IGNORE INTO automation_runs
-       (id, mode, application_month, report_month, status, target_count)
-       VALUES (?, ?, ?, ?, 'running', ?)`,
+       (id, mode, application_month, report_month, status, target_count, workflow_instance_id)
+       VALUES (?, ?, ?, ?, 'running', ?, ?)`,
     )
     .bind(
       input.id,
@@ -47,8 +49,20 @@ export async function createRun(
       input.applicationMonth,
       input.reportMonth,
       input.targetCount,
+      input.workflowInstanceId ?? null,
     )
     .run();
+
+  if (input.workflowInstanceId) {
+    await db
+      .prepare(
+        `UPDATE automation_runs
+         SET workflow_instance_id = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+      )
+      .bind(input.workflowInstanceId, input.id)
+      .run();
+  }
 
   const row = await getRun(db, input.id);
   if (!row) throw new Error("Failed to create automation run");
@@ -71,6 +85,7 @@ export async function updateRun(
   patch: Partial<{
     status: RunStatus;
     verifiedCount: number;
+    workflowInstanceId: string | null;
     authSessionId: string | null;
     authLiveViewUrl: string | null;
     authExpiresAt: string | null;
@@ -89,6 +104,7 @@ export async function updateRun(
 
   if (patch.status !== undefined) add("status", patch.status);
   if (patch.verifiedCount !== undefined) add("verified_count", patch.verifiedCount);
+  if (patch.workflowInstanceId !== undefined) add("workflow_instance_id", patch.workflowInstanceId);
   if (patch.authSessionId !== undefined) add("auth_session_id", patch.authSessionId);
   if (patch.authLiveViewUrl !== undefined) add("auth_live_view_url", patch.authLiveViewUrl);
   if (patch.authExpiresAt !== undefined) add("auth_expires_at", patch.authExpiresAt);
