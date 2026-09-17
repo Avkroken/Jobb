@@ -18,7 +18,11 @@ import {
   updateRun,
   type AutomationRunRow,
 } from "./storage";
-import { currentMonthKey, isScheduledSafetyWindow } from "./time";
+import {
+  currentMonthKey,
+  isApplicationAutomationWindow,
+  isScheduledSafetyWindow,
+} from "./time";
 
 export { JobAutomationWorkflow };
 
@@ -65,14 +69,25 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === "/api/runs/manual") {
-      const applicationMonth = currentMonthKey();
+      const now = new Date();
+      if (!isApplicationAutomationWindow(now)) {
+        return Response.json(
+          {
+            error:
+              "Manuell jobbsökning är endast aktiverad den 1:a–14:e varje månad (Europe/Stockholm).",
+          },
+          { status: 409 },
+        );
+      }
+
+      const applicationMonth = currentMonthKey(now);
       const runId = `manual:${applicationMonth}:${crypto.randomUUID()}`;
       const instance = await env.JOB_AUTOMATION.create({
         id: `manual-${crypto.randomUUID()}`,
         params: {
           mode: "manual",
           runId,
-          triggeredAt: new Date().toISOString(),
+          triggeredAt: now.toISOString(),
         },
       });
 
@@ -111,7 +126,8 @@ export default {
                 ? JSON.parse(existingProbe.summary_json)
                 : null,
             },
-            message: "BankID och aktivitetsrapportens formulärschema är redan verifierade.",
+            message:
+              "BankID och aktivitetsrapportens formulärschema är redan verifierade.",
           });
         }
 
@@ -186,8 +202,10 @@ export default {
 
     const applicationMonth = currentMonthKey(triggeredAt);
     const runId = scheduledRunId(applicationMonth);
-    const suffix = triggeredAt.toISOString().replace(/[^0-9]/g, "").slice(0, 12);
+    const existing = await getRun(env.DB, runId);
+    if (existing && existing.status !== "failed") return;
 
+    const suffix = triggeredAt.toISOString().replace(/[^0-9]/g, "").slice(0, 12);
     await env.JOB_AUTOMATION.create({
       id: `scheduled-${applicationMonth}-${suffix}`,
       params: {
@@ -199,7 +217,10 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function finalizeProbeDiscovery(env: Env, run: AutomationRunRow): Promise<void> {
+async function finalizeProbeDiscovery(
+  env: Env,
+  run: AutomationRunRow,
+): Promise<void> {
   await setReportStatus(env.DB, run.report_month, "ready");
   await updateRun(env.DB, run.id, {
     status: "completed",
