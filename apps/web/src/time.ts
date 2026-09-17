@@ -44,16 +44,25 @@ export function previousMonthKey(date = new Date()): string {
   return monthKey(previous.getUTCFullYear(), previous.getUTCMonth() + 1);
 }
 
-export function isActivityReportWindow(date = new Date()): boolean {
+/** User-visible/manual automation is allowed only during AF's monthly reporting window. */
+export function isApplicationAutomationWindow(date = new Date()): boolean {
   const local = stockholmClock(date);
   return local.day >= 1 && local.day <= 14;
 }
 
+export function isActivityReportWindow(date = new Date()): boolean {
+  return isApplicationAutomationWindow(date);
+}
+
+/**
+ * Low-traffic autonomous fallback: one invocation per day on the 10th–13th.
+ * The Cron itself runs at 09:00 UTC, which is 10:00 CET or 11:00 CEST.
+ */
 export function isScheduledSafetyWindow(date = new Date()): boolean {
   const local = stockholmClock(date);
-  return local.day === 14 && local.hour >= 10 && local.hour < 20;
+  return local.day >= 10 && local.day <= 13 && local.hour >= 10 && local.hour < 20;
 }
 
 export function nextSafetyWindowDescription(): string {
-  return "den 14:e varje månad, 10:00–20:00 Europe/Stockholm";
+  return "10–13:e varje månad, en gång per dag mellan 10:00–20:00 Europe/Stockholm";
 }
