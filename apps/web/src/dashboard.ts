@@ -34,11 +34,18 @@ export async function getDashboardData(
 
   const runs = await db
     .prepare(
-      `SELECT id, mode, application_month, report_month, status, target_count,
-              verified_count, auth_live_view_url, auth_expires_at, last_error,
-              started_at, completed_at, updated_at
-       FROM automation_runs
-       ORDER BY started_at DESC
+      `SELECT r.id, r.mode, r.application_month, r.report_month, r.status,
+              r.target_count, r.verified_count, r.auth_live_view_url,
+              r.auth_expires_at, r.last_error, r.started_at, r.completed_at,
+              r.updated_at,
+              (SELECT p.status FROM integration_probes p
+               WHERE p.automation_run_id = r.id
+               ORDER BY p.created_at DESC LIMIT 1) AS probe_status,
+              (SELECT p.error_message FROM integration_probes p
+               WHERE p.automation_run_id = r.id
+               ORDER BY p.created_at DESC LIMIT 1) AS probe_error
+       FROM automation_runs r
+       ORDER BY r.started_at DESC
        LIMIT 20`,
     )
     .all();
@@ -83,8 +90,6 @@ export async function getDashboardData(
     automaticMode: {
       enabled: true,
       schedule: "14:e varje månad, 10:00–20:00 Europe/Stockholm",
-      behavior:
-        "Säkrar innevarande månads 10 ansökningar och förbereder föregående månads aktivitetsrapport.",
     },
   };
 }
@@ -121,30 +126,32 @@ const DASHBOARD_HTML = `<!doctype html>
 </div>
 <div id="content"><div class="card">Laddar…</div></div>
 <script>
+var bankCheckInFlight=false;
 function esc(value){return String(value==null?'':value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 async function api(path,options){var response=await fetch(path,options);if(!response.ok)throw new Error(await response.text());return response.json();}
-function badge(status){var cls=status==='verified'||status==='completed'||status==='submitted'?'ok':status==='failed'?'bad':'warn';return '<span class="status '+cls+'">'+esc(status)+'</span>';}
+function badge(status){var cls=status==='verified'||status==='completed'||status==='submitted'||status==='captured'?'ok':status==='failed'?'bad':'warn';return '<span class="status '+cls+'">'+esc(status)+'</span>';}
 function applicationRow(a){return '<tr><td>'+badge(a.status)+'</td><td><a href="'+esc(a.source_url)+'" target="_blank" rel="noopener noreferrer">'+esc(a.title)+'</a><br><code>Jobb-ID '+esc(a.external_id)+'</code></td><td>'+(a.is_international?'🌍 ':'')+esc(a.location||a.country_code||'')+'</td><td>'+esc(a.verified_at||a.applied_at||'')+'</td><td class="error">'+esc(a.error_code||'')+' '+esc(a.error_message||'')+'</td></tr>';}
-function runRow(r){return '<tr><td>'+esc(r.mode)+'</td><td>'+badge(r.status)+'</td><td>'+esc(r.application_month)+'</td><td>'+esc(r.verified_count)+'/'+esc(r.target_count)+'</td><td class="error">'+esc(r.last_error||'')+'</td></tr>';}
+function runRow(r){return '<tr><td>'+esc(r.mode)+'</td><td>'+badge(r.status)+'</td><td>'+esc(r.application_month)+'</td><td>'+esc(r.verified_count)+'/'+esc(r.target_count)+'</td><td>'+(r.probe_status?badge(r.probe_status):'')+'</td><td class="error">'+esc(r.last_error||r.probe_error||'')+'</td></tr>';}
+async function autoCheckBankId(runId){if(bankCheckInFlight)return;bankCheckInFlight=true;try{var result=await api('/api/runs/'+encodeURIComponent(runId)+'/bankid/check',{method:'POST'});if(result.authenticated){await load();}}catch(error){}finally{bankCheckInFlight=false;}}
 async function load(){
  try{
   var d=await api('/api/dashboard');
   var remaining=Math.max(0,d.target-d.verified);
   var cfg=d.configuration;
-  var active=d.runs.find(function(r){return r.status==='needs_user_auth'&&r.auth_live_view_url;});
+  var active=d.runs.find(function(r){return r.status==='needs_user_auth'&&r.auth_live_view_url&&!r.probe_status;});
+  var mapped=d.runs.find(function(r){return r.probe_status==='captured';});
   var html='<div class="grid">';
   html+='<section class="card"><h2>'+esc(d.applicationMonth)+'</h2><div class="big">'+d.verified+'/'+d.target+'</div><progress max="'+d.target+'" value="'+d.verified+'"></progress><p class="muted">'+remaining+' återstår</p></section>';
   html+='<section class="card"><h2>Rapport '+esc(d.reportMonth)+'</h2>'+(d.report?badge(d.report.status):'<span class="muted">Inte skapad än</span>')+'<p class="error">'+esc(d.report&&d.report.last_error||'')+'</p></section>';
   html+='<section class="card"><h2>Konfiguration</h2><div>'+(cfg.studentConsultingCredentials?'✅':'❌')+' StudentConsulting-konto</div><div>'+(cfg.studentConsultingAutoSubmit?'✅':'❌')+' Autosubmit</div><div>'+(cfg.suitabilityPolicy?'✅':'❌')+' Lämplighetsregler</div><div>'+(cfg.bankIdNotification?'✅':'❌')+' BankID-notifiering</div></section></div>';
-  if(active){html+='<section class="card bankid"><h2>BankID krävs</h2><p>Körning <code>'+esc(active.id)+'</code> väntar på legitimering.</p><div class="toolbar"><a class="button" target="_blank" rel="noopener noreferrer" href="'+esc(active.auth_live_view_url)+'">Öppna BankID-flödet</a><button data-run="'+esc(active.id)+'" id="bankCheck">Jag har signerat – kontrollera</button></div><p class="muted">Sessionen löper ut '+esc(active.auth_expires_at)+'</p></section>';}
+  if(active){html+='<section class="card bankid"><h2>BankID krävs</h2><p>Körning <code>'+esc(active.id)+'</code> väntar på legitimering. Dashboarden känner automatiskt av när signeringen är klar.</p><div class="toolbar"><a class="button" target="_blank" rel="noopener noreferrer" href="'+esc(active.auth_live_view_url)+'">Öppna BankID-flödet</a></div><p class="muted">Sessionen löper ut '+esc(active.auth_expires_at)+'</p></section>';setTimeout(function(){autoCheckBankId(active.id);},1000);}
+  if(mapped){html+='<section class="card"><h2>Arbetsförmedlingen</h2><div class="status ok">BankID verifierat · formulärschema kartlagt</div><p class="muted">Proben sparar bara struktur och inga ifyllda fältvärden.</p></section>';}
   html+='<section class="card"><h2>Senaste ansökningar</h2><table><thead><tr><th>Status</th><th>Jobb</th><th>Ort</th><th>Datum</th><th>Fel</th></tr></thead><tbody>'+d.applications.map(applicationRow).join('')+'</tbody></table></section>';
-  html+='<section class="card"><h2>Senaste körningar</h2><table><thead><tr><th>Läge</th><th>Status</th><th>Månad</th><th>Verifierade</th><th>Fel</th></tr></thead><tbody>'+d.runs.map(runRow).join('')+'</tbody></table></section>';
+  html+='<section class="card"><h2>Senaste körningar</h2><table><thead><tr><th>Läge</th><th>Status</th><th>Månad</th><th>Verifierade</th><th>AF-probe</th><th>Fel</th></tr></thead><tbody>'+d.runs.map(runRow).join('')+'</tbody></table></section>';
   document.getElementById('content').innerHTML=html;
-  var check=document.getElementById('bankCheck');if(check)check.onclick=function(){checkBankId(check.getAttribute('data-run'));};
  }catch(error){document.getElementById('content').innerHTML='<div class="card bad">'+esc(error.message)+'</div>';}
 }
 document.getElementById('manual').onclick=async function(){var button=document.getElementById('manual');var out=document.getElementById('manualResult');button.disabled=true;out.textContent=' Startar…';try{var result=await api('/api/runs/manual',{method:'POST'});out.textContent=' Startad: '+result.runId;setTimeout(load,1500);}catch(error){out.textContent=' '+error.message;}finally{button.disabled=false;}};
-async function checkBankId(id){try{var result=await api('/api/runs/'+encodeURIComponent(id)+'/bankid/check',{method:'POST'});alert(result.message||JSON.stringify(result));await load();}catch(error){alert(error.message);}}
 load();setInterval(load,10000);
 </script>
 </body>
