@@ -45,12 +45,7 @@ export async function captureArbetsformedlingenActivityReportProbe(
     }
 
     await navigateToActivityReport(page);
-    await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => undefined);
-    await page.waitForTimeout(750);
-
-    if (!(await isArbetsformedlingenAuthenticatedPage(page))) {
-      throw new Error("Activity report navigation left the authenticated Arbetsförmedlingen session.");
-    }
+    await waitForActivityReportForm(page);
 
     const headings = await collectTexts(page.locator("h1, h2, h3"), 80);
     const controls: ActivityReportControlProbe[] = [];
@@ -60,6 +55,10 @@ export async function captureArbetsformedlingenActivityReportProbe(
     controls.push(...(await collectControls(page, "textarea", 100)));
     controls.push(...(await collectControls(page, "button", 150)));
     controls.push(...(await collectControls(page, "a", 250)));
+
+    if (!controls.some((control) => ["input", "select", "textarea"].includes(control.tag))) {
+      throw new Error("Activity-report form has no meaningful input controls; refusing to persist an empty probe.");
+    }
 
     const visibleText = await safeInnerText(page.locator("main").first());
     const questionCandidates = visibleText
@@ -105,6 +104,77 @@ async function navigateToActivityReport(page: Page): Promise<void> {
   throw new Error(
     "Could not identify a unique authenticated Arbetsförmedlingen activity-report navigation control.",
   );
+}
+
+async function waitForActivityReportForm(page: Page): Promise<void> {
+  await waitForActivityReportContext(page, 15_000);
+  if (await hasMeaningfulFormControls(page)) return;
+
+  const addLink = await uniqueVisible(
+    page.getByRole("link", {
+      name: /lägg till.*(aktivitet|jobb)|ny aktivitet|sökt.*jobb|registrera.*aktivitet/i,
+    }),
+    20,
+  );
+  if (addLink) {
+    await addLink.click({ timeout: 10_000 });
+  } else {
+    const addButton = await uniqueVisible(
+      page.getByRole("button", {
+        name: /lägg till.*(aktivitet|jobb)|ny aktivitet|sökt.*jobb|registrera.*aktivitet/i,
+      }),
+      20,
+    );
+    if (addButton) await addButton.click({ timeout: 10_000 });
+  }
+
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    if (!(await isArbetsformedlingenAuthenticatedPage(page))) {
+      throw new Error(
+        "Activity report navigation left the authenticated Arbetsförmedlingen session.",
+      );
+    }
+
+    if ((await isActivityReportContext(page)) && (await hasMeaningfulFormControls(page))) {
+      return;
+    }
+
+    await page.waitForTimeout(500);
+  }
+
+  throw new Error(
+    "Authenticated Arbetsförmedlingen activity-report form did not become ready before the probe timeout.",
+  );
+}
+
+async function waitForActivityReportContext(page: Page, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await isArbetsformedlingenAuthenticatedPage(page))) {
+      throw new Error(
+        "Activity report navigation left the authenticated Arbetsförmedlingen session.",
+      );
+    }
+    if (await isActivityReportContext(page)) return;
+    await page.waitForTimeout(400);
+  }
+  throw new Error("Could not confirm that the authenticated activity-report page loaded.");
+}
+
+async function isActivityReportContext(page: Page): Promise<boolean> {
+  if (/aktivitetsrapport/i.test(page.url())) return true;
+  const text = await safeInnerText(page.locator("main").first());
+  return /aktivitetsrapport|rapportera.*aktivitet/i.test(text);
+}
+
+async function hasMeaningfulFormControls(page: Page): Promise<boolean> {
+  const locator = page.locator("input:not([type='hidden']), select, textarea");
+  const count = Math.min(await locator.count(), 100);
+  for (let index = 0; index < count; index += 1) {
+    if (await locator.nth(index).isVisible()) return true;
+  }
+  return false;
 }
 
 async function uniqueVisible(locator: Locator, limit: number): Promise<Locator | null> {
