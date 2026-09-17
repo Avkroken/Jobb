@@ -7,9 +7,17 @@ import {
 } from "./automation-workflow";
 import { getDashboardData, renderDashboard } from "./dashboard";
 import type { EmailBinding } from "./notifier";
+import { getIntegrationProbe } from "./probe-storage";
+import { captureAndPersistActivityReportProbe } from "./probe-service";
 import { createArbetsformedlingenProvider } from "./providers";
 import type { AutomationEnv } from "./runner";
-import { getRun, scheduledRunId } from "./storage";
+import {
+  getRun,
+  scheduledRunId,
+  setReportStatus,
+  updateRun,
+  type AutomationRunRow,
+} from "./storage";
 import { currentMonthKey, isScheduledSafetyWindow } from "./time";
 
 export { JobAutomationWorkflow };
@@ -38,21 +46,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/health") {
-      return Response.json({
-        status: "ok",
-        targetApplicationsPerMonth: 10,
-        automaticSafetyRun: "14:e, 10:00–20:00 Europe/Stockholm",
-        studentConsultingConfigured: Boolean(
-          env.STUDENTCONSULTING_EMAIL && env.STUDENTCONSULTING_PASSWORD,
-        ),
-        studentConsultingAutoSubmit:
-          env.STUDENTCONSULTING_AUTOSUBMIT === "true",
-        suitabilityConfigured: Boolean(env.JOB_INCLUDE_TERMS?.trim()),
-        bankIdNotificationConfigured: Boolean(
-          (env.EMAIL && env.NOTIFY_EMAIL_TO && env.NOTIFY_EMAIL_FROM) ||
-            env.NOTIFY_WEBHOOK_URL,
-        ),
-      });
+      return Response.json({ status: "ok" });
     }
 
     const authFailure = requireDashboardAuth(request, env);
@@ -103,16 +97,65 @@ export default {
       }
 
       try {
+        const existingProbe = await getIntegrationProbe(env.DB, runId);
+        if (existingProbe?.status === "captured") {
+          await finalizeProbeDiscovery(env, run);
+          return Response.json({
+            authenticated: true,
+            runId,
+            probe: {
+              probeId: existingProbe.id,
+              status: "captured",
+              pageUrl: existingProbe.page_url,
+              summary: existingProbe.summary_json
+                ? JSON.parse(existingProbe.summary_json)
+                : null,
+            },
+            message: "BankID och aktivitetsrapportens formulärschema är redan verifierade.",
+          });
+        }
+
+        if (existingProbe?.status === "capturing") {
+          return Response.json({
+            authenticated: true,
+            runId,
+            probe: { probeId: existingProbe.id, status: "capturing" },
+            message: "Aktivitetsrapportens formulärschema kartläggs redan.",
+          });
+        }
+
         const status = await getArbetsformedlingenHandoffStatus(
           env.BROWSER,
           run.auth_session_id,
         );
+        if (!status.authenticated) {
+          return Response.json({
+            ...status,
+            runId,
+            message: "BankID-inloggningen är inte verifierad ännu.",
+          });
+        }
+
+        const probe = await captureAndPersistActivityReportProbe(
+          env,
+          runId,
+          run.auth_session_id,
+        );
+
+        if (probe.status === "captured") {
+          await finalizeProbeDiscovery(env, run);
+        }
+
         return Response.json({
           ...status,
           runId,
-          message: status.authenticated
-            ? "BankID-inloggningen är verifierad. Nästa steg är aktivitetsrapportens formuläradapter."
-            : "BankID-inloggningen är inte verifierad ännu.",
+          probe,
+          message:
+            probe.status === "captured"
+              ? "BankID är verifierat och aktivitetsrapportens formulärschema är kartlagt utan fältvärden."
+              : probe.status === "capturing"
+                ? "BankID är verifierat och formulärproben kör redan."
+                : "BankID är verifierat men formulärproben misslyckades och kommer att kunna köras om.",
         });
       } catch (error) {
         return jsonError(error, 502);
@@ -155,6 +198,18 @@ export default {
     });
   },
 } satisfies ExportedHandler<Env>;
+
+async function finalizeProbeDiscovery(env: Env, run: AutomationRunRow): Promise<void> {
+  await setReportStatus(env.DB, run.report_month, "ready");
+  await updateRun(env.DB, run.id, {
+    status: "completed",
+    completedAt: new Date().toISOString(),
+    lastError: null,
+    authSessionId: null,
+    authLiveViewUrl: null,
+    authExpiresAt: null,
+  });
+}
 
 function integerParam(value: string | null, fallback: number): number {
   if (value === null) return fallback;

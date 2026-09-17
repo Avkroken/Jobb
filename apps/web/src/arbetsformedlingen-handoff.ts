@@ -54,7 +54,6 @@ export async function startArbetsformedlingenHandoff(
       expiresAt: new Date(Date.now() + LIVE_VIEW_TTL_MS).toISOString(),
     };
   } finally {
-    // connect() disconnects while leaving the acquired Browser Run session alive.
     await browser.close();
   }
 }
@@ -69,8 +68,8 @@ export async function getArbetsformedlingenHandoffStatus(
     const context = browser.contexts()[0] ?? (await browser.newContext());
     const page = context.pages()[0] ?? (await context.newPage());
     return {
-      authenticated: await looksAuthenticated(page),
-      currentUrl: sanitizeBrowserUrl(page.url()),
+      authenticated: await isArbetsformedlingenAuthenticatedPage(page),
+      currentUrl: sanitizeArbetsformedlingenBrowserUrl(page.url()),
     };
   } finally {
     await browser.close();
@@ -95,7 +94,9 @@ export async function refreshArbetsformedlingenLiveView(
   }
 }
 
-async function looksAuthenticated(page: Page): Promise<boolean> {
+export async function isArbetsformedlingenAuthenticatedPage(
+  page: Page,
+): Promise<boolean> {
   let current: URL;
   try {
     current = new URL(page.url());
@@ -110,13 +111,11 @@ async function looksAuthenticated(page: Page): Promise<boolean> {
     return false;
   }
 
-  // A visible account-only logout control is stronger evidence than public
-  // activity-report text, which can also exist before authentication.
   const logout = page.getByText(/logga ut/i).first();
   return (await logout.count()) > 0 && (await logout.isVisible());
 }
 
-function sanitizeBrowserUrl(value: string): string {
+export function sanitizeArbetsformedlingenBrowserUrl(value: string): string {
   try {
     const parsed = new URL(value);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
