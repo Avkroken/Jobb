@@ -1,0 +1,3 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+STUDENTCONSULTING_EMAIL="user@example.com"
+STUDENTCONSULTING_PASSWORD="replace-me"
