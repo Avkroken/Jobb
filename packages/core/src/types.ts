@@ -8,8 +8,13 @@ export interface JobCandidate {
   title: string;
   employer?: string;
   location?: string;
+  country?: string;
   countryCode?: string;
   isInternational: boolean;
+  occupation?: string;
+  occupationConceptId?: string;
+  applicationUrl?: string;
+  applicationReference?: string;
   sourceUrl: string;
 }
 
@@ -28,11 +33,17 @@ export type AuthenticationState =
   | { status: "user_action_required"; action: "bankid" | "login"; message?: string }
   | { status: "failed"; code: string; message: string };
 
+export interface ApplicationResult {
+  status: "submitted" | "failed" | "unknown";
+  reference?: string;
+  error?: string;
+}
+
 export interface JobProvider {
   readonly id: JobProviderId;
   authenticate(): Promise<AuthenticationState>;
   discover(): Promise<JobCandidate[]>;
-  apply(job: JobCandidate): Promise<{ status: "submitted" | "failed" | "unknown"; reference?: string; error?: string }>;
+  apply(job: JobCandidate): Promise<ApplicationResult>;
   verify(job: JobCandidate): Promise<boolean>;
 }
 
