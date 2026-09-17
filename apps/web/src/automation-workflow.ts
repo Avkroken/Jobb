@@ -22,12 +22,15 @@ export class JobAutomationWorkflow extends WorkflowEntrypoint<
     const trigger = await step.do("resolve trigger", async () => ({
       mode: event.payload?.mode ?? "scheduled",
       runId: event.payload?.runId,
-      triggeredAt: event.payload?.triggeredAt ?? new Date().toISOString(),
+      triggeredAt: event.payload?.triggeredAt ?? event.timestamp.toISOString(),
     }));
 
     return step.do(
       "execute application automation",
-      { retries: { limit: 0 }, timeout: "30 minutes" },
+      {
+        retries: { limit: 0, delay: "1 second" },
+        timeout: "30 minutes",
+      },
       async () =>
         executeAutomation(this.env, {
           mode: trigger.mode,
