@@ -68,19 +68,26 @@ NOTIFY_WEBHOOK_URL=https://example.com/hooks/bankid
 
 The notification links to the protected dashboard. It does not expose the ephemeral Browser Run Live View URL outside the authenticated dashboard.
 
-## BankID boundary
+## BankID and authenticated form discovery
 
 The application can start and retain an Arbetsförmedlingen browser session and display the BankID handoff in the dashboard. The user must personally complete the BankID/e-identification step.
 
-The authenticated Arbetsförmedlingen activity-report form adapter is intentionally not guessed. Until that adapter has been verified against the real authenticated form, the pipeline stops after confirming that the BankID session is authenticated. This is the remaining integration step before end-to-end automatic report submission can be enabled.
+While a handoff is active, the dashboard polls the authenticated session. After BankID succeeds, a fail-closed integration probe navigates to the activity report and stores its **form schema**, not the user's entered values. The probe records items such as headings, input/select/button names, control types, list options and sanitized link paths. It never reads or stores input values.
+
+The probe exists because the authenticated activity-report form is not publicly documented as a write API. Its captured schema is used to implement and test the final adapter against the real service rather than guessing private endpoints or selectors.
+
+Since June 2026, Arbetsförmedlingen can also require answers to activities transferred from the user's handlingsplan. The automation must only answer such questions when the answer can be established from data available to the application; otherwise it must fail closed rather than inventing an answer.
 
 ## D1 migrations
 
-Apply both migrations in order:
+Apply migrations in order:
 
 ```text
 migrations/0001_initial.sql
 migrations/0002_automation.sql
+migrations/0003_integration_probes.sql
 ```
 
 `0002_automation.sql` adds workflow/run state, notification history, BankID handoff metadata, and links applications to their automation run.
+
+`0003_integration_probes.sql` stores metadata for sanitized authenticated integration probes. Full probe documents are kept in the private R2 evidence bucket.
