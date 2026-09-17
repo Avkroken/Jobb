@@ -1,3 +1,24 @@
 # Copy to .dev.vars for local development. Never commit .dev.vars.
+
+# Dashboard protection
+DASHBOARD_USERNAME="admin"
+DASHBOARD_PASSWORD="replace-with-a-long-random-password"
+PUBLIC_BASE_URL="https://jobb.example.com"
+
+# StudentConsulting runtime credentials
 STUDENTCONSULTING_EMAIL="user@example.com"
 STUDENTCONSULTING_PASSWORD="replace-me"
+STUDENTCONSULTING_AUTOSUBMIT="false"
+
+# Suitability policy. Autonomous applications fail closed until include terms exist.
+JOB_INCLUDE_TERMS="supporttekniker,it-support,helpdesk"
+JOB_EXCLUDE_TERMS="chef,senior"
+JOB_ALLOWED_LOCATIONS="Stockholm,Uppsala"
+JOB_ALLOWED_COUNTRIES="SE"
+
+# BankID notification. Cloudflare Email Service binding must be configured for email.
+NOTIFY_EMAIL_TO="user@example.com"
+NOTIFY_EMAIL_FROM="jobb@example.com"
+
+# Optional generic HTTPS webhook for another notification channel.
+# NOTIFY_WEBHOOK_URL="https://example.com/hooks/bankid"
