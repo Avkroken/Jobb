@@ -5,9 +5,11 @@ import type {
   JobCandidate,
   JobProvider,
 } from "../../core/src/types";
+import { isHostOrSubdomain } from "../../core/src/url";
 import type { BrowserLocator, BrowserPage } from "./browser";
 
 const DEFAULT_BASE_URL = "https://www.studentconsulting.com";
+const STUDENTCONSULTING_DOMAIN = "studentconsulting.com";
 
 export interface StudentConsultingDiscoverySource {
   url: string;
@@ -19,7 +21,6 @@ export interface StudentConsultingDiscoverySource {
 export interface StudentConsultingProviderOptions {
   page: BrowserPage;
   credentials: CredentialsProvider;
-  baseUrl?: string;
   maxJobs?: number;
   maxPagesPerSource?: number;
   autoSubmit?: boolean;
@@ -37,7 +38,6 @@ export class StudentConsultingProvider implements JobProvider {
 
   private readonly page: BrowserPage;
   private readonly credentials: CredentialsProvider;
-  private readonly baseUrl: string;
   private readonly maxJobs: number;
   private readonly maxPagesPerSource: number;
   private readonly autoSubmit: boolean;
@@ -46,25 +46,24 @@ export class StudentConsultingProvider implements JobProvider {
   constructor(options: StudentConsultingProviderOptions) {
     this.page = options.page;
     this.credentials = options.credentials;
-    this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
     this.maxJobs = options.maxJobs ?? 30;
     this.maxPagesPerSource = options.maxPagesPerSource ?? 3;
     this.autoSubmit = options.autoSubmit ?? false;
     this.discoverySources = options.discoverySources ?? [
       {
-        url: `${this.baseUrl}/sv/lediga-jobb/norge?country=2`,
+        url: `${DEFAULT_BASE_URL}/sv/lediga-jobb/norge?country=2`,
         country: "Norge",
         countryCode: "NO",
         isInternational: true,
       },
       {
-        url: `${this.baseUrl}/sv/lediga-jobb/danmark?country=3`,
+        url: `${DEFAULT_BASE_URL}/sv/lediga-jobb/danmark?country=3`,
         country: "Danmark",
         countryCode: "DK",
         isInternational: true,
       },
       {
-        url: `${this.baseUrl}/sv/lediga-jobb/`,
+        url: `${DEFAULT_BASE_URL}/sv/lediga-jobb/`,
         country: "Sverige",
         countryCode: "SE",
         isInternational: false,
@@ -76,8 +75,8 @@ export class StudentConsultingProvider implements JobProvider {
     try {
       const { username, password } =
         await this.credentials.getStudentConsultingCredentials();
-      const redirectUrl = `${this.baseUrl}/sv/`;
-      const loginUrl = `${this.baseUrl}/signin?language=sv-SE&redirectUrl=${encodeURIComponent(redirectUrl)}`;
+      const redirectUrl = `${DEFAULT_BASE_URL}/sv/`;
+      const loginUrl = `${DEFAULT_BASE_URL}/signin?language=sv-SE&redirectUrl=${encodeURIComponent(redirectUrl)}`;
 
       await this.page.goto(loginUrl, {
         waitUntil: "domcontentloaded",
@@ -131,7 +130,7 @@ export class StudentConsultingProvider implements JobProvider {
         };
       }
 
-      if (!host.endsWith("studentconsulting.com")) {
+      if (!isHostOrSubdomain(host, STUDENTCONSULTING_DOMAIN)) {
         return {
           status: "failed",
           code: "STUDENTCONSULTING_UNEXPECTED_REDIRECT",
@@ -153,16 +152,19 @@ export class StudentConsultingProvider implements JobProvider {
     const candidates = new Map<string, JobCandidate>();
 
     for (const source of this.discoverySources) {
+      const safeSourceUrl = normalizeStudentConsultingUrl(source.url);
+      if (!safeSourceUrl) continue;
+
       for (let pageNumber = 1; pageNumber <= this.maxPagesPerSource; pageNumber += 1) {
         if (candidates.size >= this.maxJobs) break;
 
-        const listingUrl = withPage(source.url, pageNumber);
+        const listingUrl = withPage(safeSourceUrl, pageNumber);
         await this.page.goto(listingUrl, {
           waitUntil: "domcontentloaded",
           timeout: 30_000,
         });
 
-        const links = await collectJobLinks(this.page, this.baseUrl);
+        const links = await collectJobLinks(this.page);
         if (links.length === 0) break;
 
         let addedOnPage = 0;
@@ -192,15 +194,26 @@ export class StudentConsultingProvider implements JobProvider {
       };
     }
 
+    const safeJobUrl = normalizeStudentConsultingJobUrl(job.sourceUrl);
+    if (!safeJobUrl) {
+      return {
+        status: "failed",
+        error: "INVALID_JOB_URL: the job URL is outside StudentConsulting or has an unexpected path.",
+      };
+    }
+
     const auth = await this.authenticate();
     if (auth.status !== "authenticated") {
       return {
         status: "failed",
-        error: auth.status === "failed" ? `${auth.code}: ${auth.message}` : "Authentication required.",
+        error:
+          auth.status === "failed"
+            ? `${auth.code}: ${auth.message}`
+            : "Authentication required.",
       };
     }
 
-    await this.page.goto(job.sourceUrl, {
+    await this.page.goto(safeJobUrl, {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
@@ -213,7 +226,8 @@ export class StudentConsultingProvider implements JobProvider {
     if (!this.autoSubmit) {
       return {
         status: "failed",
-        error: "AUTOSUBMIT_DISABLED: set STUDENTCONSULTING_AUTOSUBMIT=true after validating the authenticated application form.",
+        error:
+          "AUTOSUBMIT_DISABLED: set STUDENTCONSULTING_AUTOSUBMIT=true after validating the authenticated application form.",
       };
     }
 
@@ -226,7 +240,8 @@ export class StudentConsultingProvider implements JobProvider {
     if (!submit) {
       return {
         status: "failed",
-        error: "APPLICATION_SUBMIT_NOT_FOUND: no unambiguous StudentConsulting application submit button was found.",
+        error:
+          "APPLICATION_SUBMIT_NOT_FOUND: no unambiguous StudentConsulting application submit button was found.",
       };
     }
 
@@ -240,18 +255,19 @@ export class StudentConsultingProvider implements JobProvider {
     return {
       status: "unknown",
       reference: job.externalId,
-      error: "Submission was attempted but could not be verified in StudentConsulting applications.",
+      error:
+        "Submission was attempted but could not be verified in StudentConsulting applications.",
     };
   }
 
   async verify(job: JobCandidate): Promise<boolean> {
     try {
-      await this.page.goto(`${this.baseUrl}/sv/`, {
+      await this.page.goto(`${DEFAULT_BASE_URL}/sv/`, {
         waitUntil: "domcontentloaded",
         timeout: 30_000,
       });
 
-      const applicationsUrl = await findApplicationsUrl(this.page, this.baseUrl);
+      const applicationsUrl = await findApplicationsUrl(this.page);
       if (!applicationsUrl) return false;
 
       await this.page.goto(applicationsUrl, {
@@ -259,9 +275,14 @@ export class StudentConsultingProvider implements JobProvider {
         timeout: 30_000,
       });
 
-      const bodyText = normalize(await safeInnerText(this.page.locator("body").first()));
+      const bodyText = normalize(
+        await safeInnerText(this.page.locator("body").first()),
+      );
       const title = normalize(job.title);
-      return bodyText.includes(normalize(job.externalId)) || (title.length > 8 && bodyText.includes(title));
+      return (
+        bodyText.includes(normalize(job.externalId)) ||
+        (title.length > 8 && bodyText.includes(title))
+      );
     } catch {
       return false;
     }
@@ -271,7 +292,10 @@ export class StudentConsultingProvider implements JobProvider {
     sourceUrl: string,
     source: StudentConsultingDiscoverySource,
   ): Promise<JobCandidate | null> {
-    await this.page.goto(sourceUrl, {
+    const safeJobUrl = normalizeStudentConsultingJobUrl(sourceUrl);
+    if (!safeJobUrl) return null;
+
+    await this.page.goto(safeJobUrl, {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
@@ -292,8 +316,8 @@ export class StudentConsultingProvider implements JobProvider {
       countryCode: source.countryCode,
       isInternational: source.isInternational,
       occupation: parsed.occupation,
-      applicationUrl: sourceUrl,
-      sourceUrl,
+      applicationUrl: safeJobUrl,
+      sourceUrl: safeJobUrl,
     };
   }
 }
@@ -312,10 +336,36 @@ export function parseStudentConsultingJobText(
   };
 }
 
-async function collectJobLinks(
-  page: BrowserPage,
-  baseUrl: string,
-): Promise<string[]> {
+export function normalizeStudentConsultingUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value, DEFAULT_BASE_URL);
+    if (parsed.protocol !== "https:") return null;
+    if (!isHostOrSubdomain(parsed.hostname, STUDENTCONSULTING_DOMAIN)) return null;
+
+    return new URL(
+      `${parsed.pathname}${parsed.search}${parsed.hash}`,
+      DEFAULT_BASE_URL,
+    ).toString();
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeStudentConsultingJobUrl(
+  value: string,
+): string | null {
+  const safe = normalizeStudentConsultingUrl(value);
+  if (!safe) return null;
+
+  const parsed = new URL(safe);
+  if (!/\/sv\/lediga-jobb\/[^/]+\/[^/]+\/\d+\/?$/i.test(parsed.pathname)) {
+    return null;
+  }
+
+  return safe;
+}
+
+async function collectJobLinks(page: BrowserPage): Promise<string[]> {
   const anchors = page.locator('a[href*="/sv/lediga-jobb/"]');
   const count = Math.min(await anchors.count(), 250);
   const links = new Set<string>();
@@ -324,9 +374,9 @@ async function collectJobLinks(
     const href = await anchors.nth(index).getAttribute("href");
     if (!href) continue;
 
-    const url = new URL(href, baseUrl);
-    if (!/\/sv\/lediga-jobb\/[^/]+\/[^/]+\/\d+\/?$/i.test(url.pathname)) continue;
-    links.add(url.toString());
+    const safeJobUrl = normalizeStudentConsultingJobUrl(href);
+    if (!safeJobUrl) continue;
+    links.add(safeJobUrl);
   }
 
   return [...links];
@@ -350,7 +400,9 @@ async function firstVisible(
 async function validateRequiredControls(
   page: BrowserPage,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const controls = page.locator("input[required], textarea[required], select[required]");
+  const controls = page.locator(
+    "input[required], textarea[required], select[required]",
+  );
   const count = Math.min(await controls.count(), 100);
 
   for (let index = 0; index < count; index += 1) {
@@ -362,7 +414,8 @@ async function validateRequiredControls(
       if (!(await control.isChecked())) {
         return {
           ok: false,
-          error: "APPLICATION_REQUIRES_INPUT: a required checkbox or radio option is unresolved.",
+          error:
+            "APPLICATION_REQUIRES_INPUT: a required checkbox or radio option is unresolved.",
         };
       }
       continue;
@@ -371,14 +424,16 @@ async function validateRequiredControls(
     if (type === "file") {
       return {
         ok: false,
-        error: "APPLICATION_REQUIRES_INPUT: a required file upload is unresolved.",
+        error:
+          "APPLICATION_REQUIRES_INPUT: a required file upload is unresolved.",
       };
     }
 
     if ((await control.inputValue()).trim() === "") {
       return {
         ok: false,
-        error: "APPLICATION_REQUIRES_INPUT: a required application field is empty.",
+        error:
+          "APPLICATION_REQUIRES_INPUT: a required application field is empty.",
       };
     }
   }
@@ -408,10 +463,7 @@ async function findApplicationSubmit(
   return matches.length === 1 ? matches[0] : null;
 }
 
-async function findApplicationsUrl(
-  page: BrowserPage,
-  baseUrl: string,
-): Promise<string | null> {
+async function findApplicationsUrl(page: BrowserPage): Promise<string | null> {
   const anchors = page.locator("a");
   const count = Math.min(await anchors.count(), 300);
   const accepted = /^(ansökningar|applications|søknader|ansøgninger)$/i;
@@ -421,8 +473,11 @@ async function findApplicationsUrl(
     if (!(await anchor.isVisible())) continue;
     const label = (await safeInnerText(anchor)).trim();
     if (!accepted.test(label)) continue;
+
     const href = await anchor.getAttribute("href");
-    if (href) return new URL(href, baseUrl).toString();
+    if (!href) continue;
+    const safeUrl = normalizeStudentConsultingUrl(href);
+    if (safeUrl) return safeUrl;
   }
 
   return null;
@@ -449,8 +504,11 @@ function readFact(text: string, label: string): string | undefined {
 }
 
 function withPage(url: string, page: number): string {
-  if (page <= 1) return url;
-  const parsed = new URL(url);
+  const safe = normalizeStudentConsultingUrl(url);
+  if (!safe) throw new Error("Unsafe StudentConsulting listing URL");
+  if (page <= 1) return safe;
+
+  const parsed = new URL(safe);
   parsed.searchParams.set("page", String(page));
   return parsed.toString();
 }
