@@ -12,12 +12,9 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
       - run: corepack enable
       - name: Upgrade Vitest to patched version and refresh lockfile
         run: pnpm --filter @avkroken/web add -D 'vitest@^4.1.11'
