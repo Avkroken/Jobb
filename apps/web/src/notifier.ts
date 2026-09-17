@@ -39,7 +39,7 @@ export async function notifyBankIdRequired(
         text: [
           "Jobbautomation väntar på din BankID-signering.",
           dashboardUrl ? `Öppna dashboarden: ${dashboardUrl}` : "Öppna jobb-dashboarden.",
-          `Sessionen gäller till ${expiresAt}.",
+          `Sessionen gäller till ${expiresAt}.`,
           `Körning: ${runId}`,
         ].join("\n"),
       });
