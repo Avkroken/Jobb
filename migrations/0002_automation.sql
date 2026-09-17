@@ -10,6 +10,7 @@ CREATE TABLE automation_runs (
   status TEXT NOT NULL CHECK (status IN ('running','needs_user_auth','completed','failed')),
   target_count INTEGER NOT NULL DEFAULT 10 CHECK (target_count > 0),
   verified_count INTEGER NOT NULL DEFAULT 0 CHECK (verified_count >= 0),
+  workflow_instance_id TEXT,
   auth_session_id TEXT,
   auth_live_view_url TEXT,
   auth_expires_at TEXT,
