@@ -7,11 +7,17 @@ import {
 } from "./automation-workflow";
 import { getDashboardData, renderDashboard } from "./dashboard";
 import type { EmailBinding } from "./notifier";
-import { getLatestIntegrationProbe } from "./probe-storage";
+import { getIntegrationProbe } from "./probe-storage";
 import { captureAndPersistActivityReportProbe } from "./probe-service";
 import { createArbetsformedlingenProvider } from "./providers";
 import type { AutomationEnv } from "./runner";
-import { getRun, scheduledRunId } from "./storage";
+import {
+  getRun,
+  scheduledRunId,
+  setReportStatus,
+  updateRun,
+  type AutomationRunRow,
+} from "./storage";
 import { currentMonthKey, isScheduledSafetyWindow } from "./time";
 
 export { JobAutomationWorkflow };
@@ -91,8 +97,9 @@ export default {
       }
 
       try {
-        const existingProbe = await getLatestIntegrationProbe(env.DB, runId);
+        const existingProbe = await getIntegrationProbe(env.DB, runId);
         if (existingProbe?.status === "captured") {
+          await finalizeProbeDiscovery(env, run);
           return Response.json({
             authenticated: true,
             runId,
@@ -105,6 +112,15 @@ export default {
                 : null,
             },
             message: "BankID och aktivitetsrapportens formulärschema är redan verifierade.",
+          });
+        }
+
+        if (existingProbe?.status === "capturing") {
+          return Response.json({
+            authenticated: true,
+            runId,
+            probe: { probeId: existingProbe.id, status: "capturing" },
+            message: "Aktivitetsrapportens formulärschema kartläggs redan.",
           });
         }
 
@@ -125,6 +141,11 @@ export default {
           runId,
           run.auth_session_id,
         );
+
+        if (probe.status === "captured") {
+          await finalizeProbeDiscovery(env, run);
+        }
+
         return Response.json({
           ...status,
           runId,
@@ -132,7 +153,9 @@ export default {
           message:
             probe.status === "captured"
               ? "BankID är verifierat och aktivitetsrapportens formulärschema är kartlagt utan fältvärden."
-              : "BankID är verifierat men formulärproben misslyckades.",
+              : probe.status === "capturing"
+                ? "BankID är verifierat och formulärproben kör redan."
+                : "BankID är verifierat men formulärproben misslyckades och kommer att kunna köras om.",
         });
       } catch (error) {
         return jsonError(error, 502);
@@ -175,6 +198,18 @@ export default {
     });
   },
 } satisfies ExportedHandler<Env>;
+
+async function finalizeProbeDiscovery(env: Env, run: AutomationRunRow): Promise<void> {
+  await setReportStatus(env.DB, run.report_month, "ready");
+  await updateRun(env.DB, run.id, {
+    status: "completed",
+    completedAt: new Date().toISOString(),
+    lastError: null,
+    authSessionId: null,
+    authLiveViewUrl: null,
+    authExpiresAt: null,
+  });
+}
 
 function integerParam(value: string | null, fallback: number): number {
   if (value === null) return fallback;
