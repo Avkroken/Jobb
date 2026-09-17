@@ -105,57 +105,46 @@ export function renderDashboard(): Response {
 const DASHBOARD_HTML = `<!doctype html>
 <html lang="sv">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Jobbautomation</title>
-  <style>
-    :root{font-family:Inter,system-ui,sans-serif;color-scheme:dark;background:#0b0d10;color:#f2f4f7}body{margin:0;padding:24px;max-width:1180px;margin-inline:auto}h1{margin:0 0 6px}h2{font-size:18px;margin:0 0 12px}.muted{color:#9ca3af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:24px 0}.card{background:#15191f;border:1px solid #272d36;border-radius:14px;padding:18px}.big{font-size:34px;font-weight:700}.ok{color:#78dba9}.warn{color:#ffd166}.bad{color:#ff7b7b}button,a.button{border:0;border-radius:9px;padding:11px 15px;font-weight:700;cursor:pointer;background:#f2f4f7;color:#111;text-decoration:none;display:inline-block}button:disabled{opacity:.5;cursor:not-allowed}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #272d36;vertical-align:top}code{font-size:12px}.status{font-weight:700}.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.error{white-space:pre-wrap;color:#ff9a9a}.bankid{border-color:#ffd166}progress{width:100%;height:14px} @media(max-width:700px){body{padding:14px}table{display:block;overflow:auto}}
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jobbautomation</title>
+<style>
+:root{font-family:Inter,system-ui,sans-serif;color-scheme:dark;background:#0b0d10;color:#f2f4f7}body{margin:0;padding:24px;max-width:1180px;margin-inline:auto}h1{margin:0 0 6px}h2{font-size:18px;margin:0 0 12px}.muted{color:#9ca3af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:24px 0}.card{background:#15191f;border:1px solid #272d36;border-radius:14px;padding:18px}.big{font-size:34px;font-weight:700}.ok{color:#78dba9}.warn{color:#ffd166}.bad{color:#ff7b7b}button,a.button{border:0;border-radius:9px;padding:11px 15px;font-weight:700;cursor:pointer;background:#f2f4f7;color:#111;text-decoration:none;display:inline-block}button:disabled{opacity:.5;cursor:not-allowed}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #272d36;vertical-align:top}code{font-size:12px}.status{font-weight:700}.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.error{white-space:pre-wrap;color:#ff9a9a}.bankid{border-color:#ffd166}progress{width:100%;height:14px}@media(max-width:700px){body{padding:14px}table{display:block;overflow:auto}}
+</style>
 </head>
 <body>
-  <h1>Jobbautomation</h1>
-  <div class="muted">10 verifierade lämpliga jobb per månad · StudentConsulting → Arbetsförmedlingen</div>
-
-  <div class="grid">
-    <section class="card">
-      <h2>Manuellt läge</h2>
-      <p>Startar samma pipeline direkt: hitta lämpliga jobb, ansök, verifiera och förbered rapportering.</p>
-      <button id="manual">Kör nu</button>
-      <span id="manualResult" class="muted"></span>
-    </section>
-    <section class="card">
-      <h2>Automatiskt säkerhetsläge</h2>
-      <div class="status ok">Aktivt</div>
-      <p>Den 14:e varje månad mellan 10:00 och 20:00, svensk tid.</p>
-      <p class="muted">Körningen är idempotent: den söker bara det som återstår upp till 10 och skapar inte dubbletter.</p>
-    </section>
-  </div>
-
-  <div id="content"><div class="card">Laddar…</div></div>
-
+<h1>Jobbautomation</h1>
+<div class="muted">10 verifierade lämpliga jobb per månad · StudentConsulting → Arbetsförmedlingen</div>
+<div class="grid">
+<section class="card"><h2>Manuellt läge</h2><p>Startar samma pipeline direkt: hitta lämpliga jobb, ansök, verifiera och förbered rapportering.</p><button id="manual">Kör nu</button> <span id="manualResult" class="muted"></span></section>
+<section class="card"><h2>Automatiskt säkerhetsläge</h2><div class="status ok">Aktivt</div><p>Den 14:e varje månad mellan 10:00 och 20:00, svensk tid.</p><p class="muted">Söker bara det som återstår upp till 10 och skapar inte dubbletter.</p></section>
+</div>
+<div id="content"><div class="card">Laddar…</div></div>
 <script>
-const esc=s=>String(s??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
-async function api(path,options){const r=await fetch(path,options);if(!r.ok)throw new Error(await r.text());return r.json()}
-function badge(s){const c=s==='verified'||s==='completed'||s==='submitted'?'ok':s==='failed'?'bad':'warn';return '<span class="status '+c+'">'+esc(s)+'</span>'}
+function esc(value){return String(value==null?'':value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+async function api(path,options){var response=await fetch(path,options);if(!response.ok)throw new Error(await response.text());return response.json();}
+function badge(status){var cls=status==='verified'||status==='completed'||status==='submitted'?'ok':status==='failed'?'bad':'warn';return '<span class="status '+cls+'">'+esc(status)+'</span>';}
+function applicationRow(a){return '<tr><td>'+badge(a.status)+'</td><td><a href="'+esc(a.source_url)+'" target="_blank" rel="noopener noreferrer">'+esc(a.title)+'</a><br><code>Jobb-ID '+esc(a.external_id)+'</code></td><td>'+(a.is_international?'🌍 ':'')+esc(a.location||a.country_code||'')+'</td><td>'+esc(a.verified_at||a.applied_at||'')+'</td><td class="error">'+esc(a.error_code||'')+' '+esc(a.error_message||'')+'</td></tr>';}
+function runRow(r){return '<tr><td>'+esc(r.mode)+'</td><td>'+badge(r.status)+'</td><td>'+esc(r.application_month)+'</td><td>'+esc(r.verified_count)+'/'+esc(r.target_count)+'</td><td class="error">'+esc(r.last_error||'')+'</td></tr>';}
 async function load(){
  try{
-  const d=await api('/api/dashboard');
-  const remaining=Math.max(0,d.target-d.verified);
-  const cfg=d.configuration;
-  const activeBank=d.runs.find(r=>r.status==='needs_user_auth'&&r.auth_live_view_url);
-  document.getElementById('content').innerHTML=`
-   <div class="grid">
-    <section class="card"><h2>${esc(d.applicationMonth)}</h2><div class="big">${d.verified}/${d.target}</div><progress max="${d.target}" value="${d.verified}"></progress><p class="muted">${remaining} återstår</p></section>
-    <section class="card"><h2>Rapport ${esc(d.reportMonth)}</h2>${d.report?badge(d.report.status):'<span class="muted">Inte skapad än</span>'}<p class="error">${esc(d.report?.last_error||'')}</p></section>
-    <section class="card"><h2>Konfiguration</h2><div>${cfg.studentConsultingCredentials?'✅':'❌'} StudentConsulting-konto</div><div>${cfg.studentConsultingAutoSubmit?'✅':'❌'} Autosubmit</div><div>${cfg.suitabilityPolicy?'✅':'❌'} Lämplighetsregler</div><div>${cfg.bankIdNotification?'✅':'❌'} BankID-notifiering</div></section>
-   </div>
-   ${activeBank?`<section class="card bankid"><h2>BankID krävs</h2><p>Körning <code>${esc(activeBank.id)}</code> väntar på legitimering.</p><div class="toolbar"><a class="button" target="_blank" rel="noopener noreferrer" href="${esc(activeBank.auth_live_view_url)}">Öppna BankID-flödet</a><button onclick="checkBankId('${esc(activeBank.id)}')">Jag har signerat – kontrollera</button></div><p class="muted">Sessionen löper ut ${esc(activeBank.auth_expires_at)}</p></section>`:''}
-   <section class="card"><h2>Senaste ansökningar</h2><table><thead><tr><th>Status</th><th>Jobb</th><th>Ort</th><th>Datum</th><th>Fel</th></tr></thead><tbody>${d.applications.map(a=>`<tr><td>${badge(a.status)}</td><td><a href="${esc(a.source_url)}" target="_blank" rel="noopener noreferrer">${esc(a.title)}</a><br><code>Jobb-ID ${esc(a.external_id)}</code></td><td>${a.is_international?'🌍 ':''}${esc(a.location||a.country_code||'')}</td><td>${esc(a.verified_at||a.applied_at||'')}</td><td class="error">${esc(a.error_code||'')} ${esc(a.error_message||'')}</td></tr>`).join('')}</tbody></table></section>
-   <section class="card"><h2>Senaste körningar</h2><table><thead><tr><th>Läge</th><th>Status</th><th>Månad</th><th>Verifierade</th><th>Fel</th></tr></thead><tbody>${d.runs.map(r=>`<tr><td>${esc(r.mode)}</td><td>${badge(r.status)}</td><td>${esc(r.application_month)}</td><td>${esc(r.verified_count)}/${esc(r.target_count)}</td><td class="error">${esc(r.last_error||'')}</td></tr>`).join('')}</tbody></table></section>`;
- }catch(e){document.getElementById('content').innerHTML='<div class="card bad">'+esc(e.message)+'</div>'}
+  var d=await api('/api/dashboard');
+  var remaining=Math.max(0,d.target-d.verified);
+  var cfg=d.configuration;
+  var active=d.runs.find(function(r){return r.status==='needs_user_auth'&&r.auth_live_view_url;});
+  var html='<div class="grid">';
+  html+='<section class="card"><h2>'+esc(d.applicationMonth)+'</h2><div class="big">'+d.verified+'/'+d.target+'</div><progress max="'+d.target+'" value="'+d.verified+'"></progress><p class="muted">'+remaining+' återstår</p></section>';
+  html+='<section class="card"><h2>Rapport '+esc(d.reportMonth)+'</h2>'+(d.report?badge(d.report.status):'<span class="muted">Inte skapad än</span>')+'<p class="error">'+esc(d.report&&d.report.last_error||'')+'</p></section>';
+  html+='<section class="card"><h2>Konfiguration</h2><div>'+(cfg.studentConsultingCredentials?'✅':'❌')+' StudentConsulting-konto</div><div>'+(cfg.studentConsultingAutoSubmit?'✅':'❌')+' Autosubmit</div><div>'+(cfg.suitabilityPolicy?'✅':'❌')+' Lämplighetsregler</div><div>'+(cfg.bankIdNotification?'✅':'❌')+' BankID-notifiering</div></section></div>';
+  if(active){html+='<section class="card bankid"><h2>BankID krävs</h2><p>Körning <code>'+esc(active.id)+'</code> väntar på legitimering.</p><div class="toolbar"><a class="button" target="_blank" rel="noopener noreferrer" href="'+esc(active.auth_live_view_url)+'">Öppna BankID-flödet</a><button data-run="'+esc(active.id)+'" id="bankCheck">Jag har signerat – kontrollera</button></div><p class="muted">Sessionen löper ut '+esc(active.auth_expires_at)+'</p></section>';}
+  html+='<section class="card"><h2>Senaste ansökningar</h2><table><thead><tr><th>Status</th><th>Jobb</th><th>Ort</th><th>Datum</th><th>Fel</th></tr></thead><tbody>'+d.applications.map(applicationRow).join('')+'</tbody></table></section>';
+  html+='<section class="card"><h2>Senaste körningar</h2><table><thead><tr><th>Läge</th><th>Status</th><th>Månad</th><th>Verifierade</th><th>Fel</th></tr></thead><tbody>'+d.runs.map(runRow).join('')+'</tbody></table></section>';
+  document.getElementById('content').innerHTML=html;
+  var check=document.getElementById('bankCheck');if(check)check.onclick=function(){checkBankId(check.getAttribute('data-run'));};
+ }catch(error){document.getElementById('content').innerHTML='<div class="card bad">'+esc(error.message)+'</div>';}
 }
-document.getElementById('manual').onclick=async()=>{const b=document.getElementById('manual');const out=document.getElementById('manualResult');b.disabled=true;out.textContent=' Startar…';try{const r=await api('/api/runs/manual',{method:'POST'});out.textContent=' Startad: '+r.runId;setTimeout(load,1500)}catch(e){out.textContent=' '+e.message}finally{b.disabled=false}};
-async function checkBankId(id){try{const r=await api('/api/runs/'+encodeURIComponent(id)+'/bankid/check',{method:'POST'});alert(r.message||JSON.stringify(r));await load()}catch(e){alert(e.message)}}
+document.getElementById('manual').onclick=async function(){var button=document.getElementById('manual');var out=document.getElementById('manualResult');button.disabled=true;out.textContent=' Startar…';try{var result=await api('/api/runs/manual',{method:'POST'});out.textContent=' Startad: '+result.runId;setTimeout(load,1500);}catch(error){out.textContent=' '+error.message;}finally{button.disabled=false;}};
+async function checkBankId(id){try{var result=await api('/api/runs/'+encodeURIComponent(id)+'/bankid/check',{method:'POST'});alert(result.message||JSON.stringify(result));await load();}catch(error){alert(error.message);}}
 load();setInterval(load,10000);
 </script>
 </body>
