@@ -40,10 +40,10 @@ export async function getDashboardData(
               r.updated_at,
               (SELECT p.status FROM integration_probes p
                WHERE p.automation_run_id = r.id
-               ORDER BY p.created_at DESC LIMIT 1) AS probe_status,
+               LIMIT 1) AS probe_status,
               (SELECT p.error_message FROM integration_probes p
                WHERE p.automation_run_id = r.id
-               ORDER BY p.created_at DESC LIMIT 1) AS probe_error
+               LIMIT 1) AS probe_error
        FROM automation_runs r
        ORDER BY r.started_at DESC
        LIMIT 20`,
@@ -138,13 +138,13 @@ async function load(){
   var d=await api('/api/dashboard');
   var remaining=Math.max(0,d.target-d.verified);
   var cfg=d.configuration;
-  var active=d.runs.find(function(r){return r.status==='needs_user_auth'&&r.auth_live_view_url&&!r.probe_status;});
+  var active=d.runs.find(function(r){return r.status==='needs_user_auth'&&r.auth_live_view_url&&r.probe_status!=='captured';});
   var mapped=d.runs.find(function(r){return r.probe_status==='captured';});
   var html='<div class="grid">';
   html+='<section class="card"><h2>'+esc(d.applicationMonth)+'</h2><div class="big">'+d.verified+'/'+d.target+'</div><progress max="'+d.target+'" value="'+d.verified+'"></progress><p class="muted">'+remaining+' återstår</p></section>';
   html+='<section class="card"><h2>Rapport '+esc(d.reportMonth)+'</h2>'+(d.report?badge(d.report.status):'<span class="muted">Inte skapad än</span>')+'<p class="error">'+esc(d.report&&d.report.last_error||'')+'</p></section>';
   html+='<section class="card"><h2>Konfiguration</h2><div>'+(cfg.studentConsultingCredentials?'✅':'❌')+' StudentConsulting-konto</div><div>'+(cfg.studentConsultingAutoSubmit?'✅':'❌')+' Autosubmit</div><div>'+(cfg.suitabilityPolicy?'✅':'❌')+' Lämplighetsregler</div><div>'+(cfg.bankIdNotification?'✅':'❌')+' BankID-notifiering</div></section></div>';
-  if(active){html+='<section class="card bankid"><h2>BankID krävs</h2><p>Körning <code>'+esc(active.id)+'</code> väntar på legitimering. Dashboarden känner automatiskt av när signeringen är klar.</p><div class="toolbar"><a class="button" target="_blank" rel="noopener noreferrer" href="'+esc(active.auth_live_view_url)+'">Öppna BankID-flödet</a></div><p class="muted">Sessionen löper ut '+esc(active.auth_expires_at)+'</p></section>';setTimeout(function(){autoCheckBankId(active.id);},1000);}
+  if(active){html+='<section class="card bankid"><h2>BankID krävs</h2><p>Körning <code>'+esc(active.id)+'</code> väntar på legitimering eller formulärkartläggning. Dashboarden försöker automatiskt igen efter tillfälliga probe-fel.</p><div class="toolbar"><a class="button" target="_blank" rel="noopener noreferrer" href="'+esc(active.auth_live_view_url)+'">Öppna BankID-flödet</a></div><p class="muted">Sessionen löper ut '+esc(active.auth_expires_at)+'</p><p class="error">'+esc(active.probe_error||'')+'</p></section>';setTimeout(function(){autoCheckBankId(active.id);},1000);}
   if(mapped){html+='<section class="card"><h2>Arbetsförmedlingen</h2><div class="status ok">BankID verifierat · formulärschema kartlagt</div><p class="muted">Proben sparar bara struktur och inga ifyllda fältvärden.</p></section>';}
   html+='<section class="card"><h2>Senaste ansökningar</h2><table><thead><tr><th>Status</th><th>Jobb</th><th>Ort</th><th>Datum</th><th>Fel</th></tr></thead><tbody>'+d.applications.map(applicationRow).join('')+'</tbody></table></section>';
   html+='<section class="card"><h2>Senaste körningar</h2><table><thead><tr><th>Läge</th><th>Status</th><th>Månad</th><th>Verifierade</th><th>AF-probe</th><th>Fel</th></tr></thead><tbody>'+d.runs.map(runRow).join('')+'</tbody></table></section>';
