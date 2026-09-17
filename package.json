@@ -1,0 +1,16 @@
+{
+  "name": "@avkroken/jobb",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev": "pnpm --filter @avkroken/web dev",
+    "deploy": "pnpm --filter @avkroken/web deploy"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}
