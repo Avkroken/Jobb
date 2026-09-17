@@ -9,8 +9,8 @@ import { getDashboardData, renderDashboard } from "./dashboard";
 import type { EmailBinding } from "./notifier";
 import { createArbetsformedlingenProvider } from "./providers";
 import type { AutomationEnv } from "./runner";
-import { getRun } from "./storage";
-import { currentMonthKey } from "./time";
+import { getRun, scheduledRunId } from "./storage";
+import { currentMonthKey, isScheduledSafetyWindow } from "./time";
 
 export { JobAutomationWorkflow };
 
@@ -135,6 +135,24 @@ export default {
     }
 
     return new Response("Not found", { status: 404 });
+  },
+
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    const triggeredAt = new Date(controller.scheduledTime);
+    if (!isScheduledSafetyWindow(triggeredAt)) return;
+
+    const applicationMonth = currentMonthKey(triggeredAt);
+    const runId = scheduledRunId(applicationMonth);
+    const suffix = triggeredAt.toISOString().replace(/[^0-9]/g, "").slice(0, 12);
+
+    await env.JOB_AUTOMATION.create({
+      id: `scheduled-${applicationMonth}-${suffix}`,
+      params: {
+        mode: "scheduled",
+        runId,
+        triggeredAt: triggeredAt.toISOString(),
+      },
+    });
   },
 } satisfies ExportedHandler<Env>;
 
