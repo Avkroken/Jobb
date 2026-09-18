@@ -262,12 +262,7 @@ export class StudentConsultingProvider implements JobProvider {
 
       // Dispatch the already-validated unique submit control directly so a
       // successful return means the external click side effect was emitted.
-      await submit.evaluate((element) => {
-        if (!(element instanceof HTMLElement)) {
-          throw new Error("APPLICATION_SUBMIT_INVALID: submit control is not an HTMLElement.");
-        }
-        element.click();
-      });
+      await submit.dispatchEvent("click");
       submissionAttempted = true;
       await waitForSubmissionToSettle(this.page, SUBMISSION_SETTLE_MS);
 
