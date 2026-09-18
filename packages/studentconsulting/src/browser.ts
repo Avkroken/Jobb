@@ -5,6 +5,7 @@ export interface BrowserLocator {
   isVisible(): Promise<boolean>;
   fill(value: string): Promise<void>;
   click(options?: { timeout?: number }): Promise<void>;
+  dispatchEvent(type: string): Promise<void>;
   getAttribute(name: string): Promise<string | null>;
   innerText(): Promise<string>;
   inputValue(): Promise<string>;

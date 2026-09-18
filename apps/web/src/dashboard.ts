@@ -1,6 +1,10 @@
 import { MONTHLY_APPLICATION_TARGET } from "../../../packages/core/src/types";
 import { suitabilityConfigured, type SuitabilityEnv } from "./policy";
-import { currentMonthKey, previousMonthKey } from "./time";
+import {
+  currentMonthKey,
+  isApplicationAutomationWindow,
+  previousMonthKey,
+} from "./time";
 
 export async function getDashboardData(
   db: D1Database,
@@ -23,6 +27,15 @@ export async function getDashboardData(
     )
     .bind(applicationMonth)
     .first<{ verified: number }>();
+
+  const quota = await db
+    .prepare(
+      `SELECT COUNT(*) AS occupied
+       FROM monthly_application_slots
+       WHERE report_month = ? AND state <> 'free'`,
+    )
+    .bind(applicationMonth)
+    .first<{ occupied: number }>();
 
   const report = await db
     .prepare(
@@ -73,6 +86,8 @@ export async function getDashboardData(
     reportMonth,
     target: MONTHLY_APPLICATION_TARGET,
     verified: Number(progress?.verified ?? 0),
+    quotaUsed: Number(quota?.occupied ?? 0),
+    applicationWindowOpen: isApplicationAutomationWindow(),
     report: report ?? null,
     runs: runs.results,
     applications: applications.results,
@@ -89,7 +104,9 @@ export async function getDashboardData(
     },
     automaticMode: {
       enabled: true,
-      schedule: "14:e varje månad, 10:00–20:00 Europe/Stockholm",
+      schedule:
+        "10–13:e varje månad, en gång per dag mellan 10:00–20:00 Europe/Stockholm",
+      applicationWindow: "1–14:e varje månad",
     },
   };
 }
@@ -119,10 +136,10 @@ const DASHBOARD_HTML = `<!doctype html>
 </head>
 <body>
 <h1>Jobbautomation</h1>
-<div class="muted">10 verifierade lämpliga jobb per månad · StudentConsulting → Arbetsförmedlingen</div>
+<div class="muted">Exakt 10 slots per månad · StudentConsulting → Arbetsförmedlingen</div>
 <div class="grid">
-<section class="card"><h2>Manuellt läge</h2><p>Startar samma pipeline direkt: hitta lämpliga jobb, ansök, verifiera och förbered rapportering.</p><button id="manual">Kör nu</button> <span id="manualResult" class="muted"></span></section>
-<section class="card"><h2>Automatiskt säkerhetsläge</h2><div class="status ok">Aktivt</div><p>Den 14:e varje månad mellan 10:00 och 20:00, svensk tid.</p><p class="muted">Söker bara det som återstår upp till 10 och skapar inte dubbletter.</p></section>
+<section class="card"><h2>Manuellt läge</h2><p>Startar samma pipeline direkt. Jobbansökningar är endast tillåtna den 1:a–14:e varje månad.</p><button id="manual" disabled>Kör nu</button> <span id="manualResult" class="muted"></span></section>
+<section class="card"><h2>Automatiskt säkerhetsläge</h2><div class="status ok">Aktivt</div><p>En körning per dag den 10:e–13:e, inom 10:00–20:00 svensk tid.</p><p class="muted">Dag 10 gör huvudförsöket. Dag 11–13 används bara om den gemensamma månadskörningen fortfarande är failed. Ingen jobbsökning den 15:e–31:e.</p></section>
 </div>
 <div id="content"><div class="card">Laddar…</div></div>
 <script>
@@ -130,7 +147,8 @@ var bankCheckInFlight=false;
 function esc(value){return String(value==null?'':value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 async function api(path,options){var response=await fetch(path,options);if(!response.ok)throw new Error(await response.text());return response.json();}
 function badge(status){var cls=status==='verified'||status==='completed'||status==='submitted'||status==='captured'?'ok':status==='failed'?'bad':'warn';return '<span class="status '+cls+'">'+esc(status)+'</span>';}
-function applicationRow(a){return '<tr><td>'+badge(a.status)+'</td><td><a href="'+esc(a.source_url)+'" target="_blank" rel="noopener noreferrer">'+esc(a.title)+'</a><br><code>Jobb-ID '+esc(a.external_id)+'</code></td><td>'+(a.is_international?'🌍 ':'')+esc(a.location||a.country_code||'')+'</td><td>'+esc(a.verified_at||a.applied_at||'')+'</td><td class="error">'+esc(a.error_code||'')+' '+esc(a.error_message||'')+'</td></tr>';}
+function errorStage(code){var map={APPLICATION_FAILED:'Ansökan',APPLICATION_UNKNOWN:'Ansökan – okänt resultat',VERIFICATION_FAILED:'Verifiering hos StudentConsulting',UNEXPECTED_APPLICATION_ERROR:'Automation'};return map[code]||'Fel';}
+function applicationRow(a){var detail=a.error_code?'<strong>'+esc(errorStage(a.error_code))+'</strong><br><code>'+esc(a.error_code)+'</code><br>'+esc(a.error_message||''):(a.error_message?esc(a.error_message):'');return '<tr><td>'+badge(a.status)+'</td><td><a href="'+esc(a.source_url)+'" target="_blank" rel="noopener noreferrer">'+esc(a.title)+'</a><br><code>Jobb-ID '+esc(a.external_id)+'</code></td><td>'+(a.is_international?'🌍 ':'')+esc(a.location||a.country_code||'')+'</td><td>'+esc(a.verified_at||a.applied_at||'')+'</td><td class="error">'+detail+'</td></tr>';}
 function runRow(r){return '<tr><td>'+esc(r.mode)+'</td><td>'+badge(r.status)+'</td><td>'+esc(r.application_month)+'</td><td>'+esc(r.verified_count)+'/'+esc(r.target_count)+'</td><td>'+(r.probe_status?badge(r.probe_status):'')+'</td><td class="error">'+esc(r.last_error||r.probe_error||'')+'</td></tr>';}
 async function autoCheckBankId(runId){if(bankCheckInFlight)return;bankCheckInFlight=true;try{var result=await api('/api/runs/'+encodeURIComponent(runId)+'/bankid/check',{method:'POST'});if(result.authenticated){await load();}}catch(error){}finally{bankCheckInFlight=false;}}
 async function load(){
@@ -141,17 +159,19 @@ async function load(){
   var active=d.runs.find(function(r){return r.status==='needs_user_auth'&&r.auth_live_view_url&&r.probe_status!=='captured';});
   var mapped=d.runs.find(function(r){return r.probe_status==='captured';});
   var html='<div class="grid">';
-  html+='<section class="card"><h2>'+esc(d.applicationMonth)+'</h2><div class="big">'+d.verified+'/'+d.target+'</div><progress max="'+d.target+'" value="'+d.verified+'"></progress><p class="muted">'+remaining+' återstår</p></section>';
+  html+='<section class="card"><h2>'+esc(d.applicationMonth)+'</h2><div class="big">'+d.verified+'/'+d.target+'</div><progress max="'+d.target+'" value="'+d.verified+'"></progress><p class="muted">'+remaining+' verifierade återstår · '+esc(d.quotaUsed)+'/'+d.target+' slots upptagna</p></section>';
   html+='<section class="card"><h2>Rapport '+esc(d.reportMonth)+'</h2>'+(d.report?badge(d.report.status):'<span class="muted">Inte skapad än</span>')+'<p class="error">'+esc(d.report&&d.report.last_error||'')+'</p></section>';
   html+='<section class="card"><h2>Konfiguration</h2><div>'+(cfg.studentConsultingCredentials?'✅':'❌')+' StudentConsulting-konto</div><div>'+(cfg.studentConsultingAutoSubmit?'✅':'❌')+' Autosubmit</div><div>'+(cfg.suitabilityPolicy?'✅':'❌')+' Lämplighetsregler</div><div>'+(cfg.bankIdNotification?'✅':'❌')+' BankID-notifiering</div></section></div>';
+  var manual=document.getElementById('manual');if(manual){manual.disabled=!d.applicationWindowOpen;manual.title=d.applicationWindowOpen?'':'Jobbautomation är stängd den 15:e–månadens slut.';}
+  if(!d.applicationWindowOpen){document.getElementById('manualResult').textContent=' Stängt 15:e–månadens slut.';}
   if(active){html+='<section class="card bankid"><h2>BankID krävs</h2><p>Körning <code>'+esc(active.id)+'</code> väntar på legitimering eller formulärkartläggning. Dashboarden försöker automatiskt igen efter tillfälliga probe-fel.</p><div class="toolbar"><a class="button" target="_blank" rel="noopener noreferrer" href="'+esc(active.auth_live_view_url)+'">Öppna BankID-flödet</a></div><p class="muted">Sessionen löper ut '+esc(active.auth_expires_at)+'</p><p class="error">'+esc(active.probe_error||'')+'</p></section>';setTimeout(function(){autoCheckBankId(active.id);},1000);}
   if(mapped){html+='<section class="card"><h2>Arbetsförmedlingen</h2><div class="status ok">BankID verifierat · formulärschema kartlagt</div><p class="muted">Proben sparar bara struktur och inga ifyllda fältvärden.</p></section>';}
-  html+='<section class="card"><h2>Senaste ansökningar</h2><table><thead><tr><th>Status</th><th>Jobb</th><th>Ort</th><th>Datum</th><th>Fel</th></tr></thead><tbody>'+d.applications.map(applicationRow).join('')+'</tbody></table></section>';
+  html+='<section class="card"><h2>Senaste ansökningar</h2><table><thead><tr><th>Status</th><th>Jobb</th><th>Ort</th><th>Datum</th><th>Fel – var och varför</th></tr></thead><tbody>'+d.applications.map(applicationRow).join('')+'</tbody></table></section>';
   html+='<section class="card"><h2>Senaste körningar</h2><table><thead><tr><th>Läge</th><th>Status</th><th>Månad</th><th>Verifierade</th><th>AF-probe</th><th>Fel</th></tr></thead><tbody>'+d.runs.map(runRow).join('')+'</tbody></table></section>';
   document.getElementById('content').innerHTML=html;
  }catch(error){document.getElementById('content').innerHTML='<div class="card bad">'+esc(error.message)+'</div>';}
 }
-document.getElementById('manual').onclick=async function(){var button=document.getElementById('manual');var out=document.getElementById('manualResult');button.disabled=true;out.textContent=' Startar…';try{var result=await api('/api/runs/manual',{method:'POST'});out.textContent=' Startad: '+result.runId;setTimeout(load,1500);}catch(error){out.textContent=' '+error.message;}finally{button.disabled=false;}};
+document.getElementById('manual').onclick=async function(){var button=document.getElementById('manual');var out=document.getElementById('manualResult');button.disabled=true;out.textContent=' Startar…';try{var result=await api('/api/runs/manual',{method:'POST'});out.textContent=' Startad: '+result.runId;setTimeout(load,1500);}catch(error){out.textContent=' '+error.message;}finally{setTimeout(load,100);}};
 load();setInterval(load,10000);
 </script>
 </body>

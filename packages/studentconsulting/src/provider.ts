@@ -190,6 +190,7 @@ export class StudentConsultingProvider implements JobProvider {
       return {
         status: "failed",
         error: "StudentConsulting provider received a job from another provider.",
+        submissionAttempted: false,
       };
     }
 
@@ -198,65 +199,96 @@ export class StudentConsultingProvider implements JobProvider {
       return {
         status: "failed",
         error: "INVALID_JOB_URL: the job URL is outside StudentConsulting or has an unexpected path.",
+        submissionAttempted: false,
       };
     }
 
-    const auth = await this.authenticate();
-    if (auth.status !== "authenticated") {
+    let submissionAttempted = false;
+
+    try {
+      const auth = await this.authenticate();
+      if (auth.status !== "authenticated") {
+        return {
+          status: "failed",
+          error:
+            auth.status === "failed"
+              ? `${auth.code}: ${auth.message}`
+              : "Authentication required.",
+          submissionAttempted: false,
+        };
+      }
+
+      await this.page.goto(safeJobUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+
+      const bodyText = await safeInnerText(this.page.locator("body").first());
+      if (alreadyApplied(bodyText)) {
+        return {
+          status: "submitted",
+          reference: job.externalId,
+          submissionAttempted: false,
+        };
+      }
+
+      if (!this.autoSubmit) {
+        return {
+          status: "failed",
+          error:
+            "AUTOSUBMIT_DISABLED: set STUDENTCONSULTING_AUTOSUBMIT=true after validating the authenticated application form.",
+          submissionAttempted: false,
+        };
+      }
+
+      const requiredState = await validateRequiredControls(this.page);
+      if (!requiredState.ok) {
+        return {
+          status: "failed",
+          error: requiredState.error,
+          submissionAttempted: false,
+        };
+      }
+
+      const submit = await findApplicationSubmit(this.page);
+      if (!submit) {
+        return {
+          status: "failed",
+          error:
+            "APPLICATION_SUBMIT_NOT_FOUND: no unambiguous StudentConsulting application submit button was found.",
+          submissionAttempted: false,
+        };
+      }
+
+      // Dispatch the already-validated unique submit control directly so a
+      // successful return means the external click side effect was emitted.
+      await submit.dispatchEvent("click");
+      submissionAttempted = true;
+      await waitForSubmissionToSettle(this.page, SUBMISSION_SETTLE_MS);
+
+      if (await this.verify(job)) {
+        return {
+          status: "submitted",
+          reference: job.externalId,
+          submissionAttempted: true,
+        };
+      }
+
       return {
-        status: "failed",
+        status: "unknown",
+        reference: job.externalId,
         error:
-          auth.status === "failed"
-            ? `${auth.code}: ${auth.message}`
-            : "Authentication required.",
+          "Submission was attempted but the exact Jobb-ID could not be verified in StudentConsulting applications.",
+        submissionAttempted: true,
       };
-    }
-
-    await this.page.goto(safeJobUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
-
-    const bodyText = await safeInnerText(this.page.locator("body").first());
-    if (alreadyApplied(bodyText)) {
-      return { status: "submitted", reference: job.externalId };
-    }
-
-    if (!this.autoSubmit) {
+    } catch (error) {
       return {
-        status: "failed",
-        error:
-          "AUTOSUBMIT_DISABLED: set STUDENTCONSULTING_AUTOSUBMIT=true after validating the authenticated application form.",
+        status: submissionAttempted ? "unknown" : "failed",
+        reference: submissionAttempted ? job.externalId : undefined,
+        error: errorMessage(error),
+        submissionAttempted,
       };
     }
-
-    const requiredState = await validateRequiredControls(this.page);
-    if (!requiredState.ok) {
-      return { status: "failed", error: requiredState.error };
-    }
-
-    const submit = await findApplicationSubmit(this.page);
-    if (!submit) {
-      return {
-        status: "failed",
-        error:
-          "APPLICATION_SUBMIT_NOT_FOUND: no unambiguous StudentConsulting application submit button was found.",
-      };
-    }
-
-    await submit.click({ timeout: 10_000 });
-    await waitForSubmissionToSettle(this.page, SUBMISSION_SETTLE_MS);
-
-    if (await this.verify(job)) {
-      return { status: "submitted", reference: job.externalId };
-    }
-
-    return {
-      status: "unknown",
-      reference: job.externalId,
-      error:
-        "Submission was attempted but the exact Jobb-ID could not be verified in StudentConsulting applications.",
-    };
   }
 
   async verify(job: JobCandidate): Promise<boolean> {

@@ -37,6 +37,8 @@ export interface ApplicationResult {
   status: "submitted" | "failed" | "unknown";
   reference?: string;
   error?: string;
+  /** True only after the external submit control has actually been activated. */
+  submissionAttempted?: boolean;
 }
 
 export interface JobProvider {
