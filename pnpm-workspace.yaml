@@ -1,3 +1,9 @@
 packages:
   - apps/*
   - packages/*
+
+# These install scripts are intentionally not needed by this Worker build.
+# Declaring them here keeps pnpm's supply-chain protection without warning.
+ignoredBuiltDependencies:
+  - esbuild
+  - workerd
