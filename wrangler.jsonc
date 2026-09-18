@@ -1,12 +1,25 @@
 {
-  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "jobb",
-  "main": "src/index.ts",
+  "main": "apps/web/src/index.ts",
   "compatibility_date": "2026-09-17",
   "compatibility_flags": [
     "nodejs_compat"
   ],
   "upload_source_maps": true,
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": false,
+      "head_sampling_rate": 1,
+      "persist": true
+    }
+  },
   "browser": {
     "binding": "BROWSER"
   },
@@ -14,7 +27,7 @@
     {
       "binding": "DB",
       "database_name": "jobb",
-      "migrations_dir": "../../migrations"
+      "migrations_dir": "migrations"
     }
   ],
   "r2_buckets": [
@@ -45,18 +58,5 @@
       "pattern": "jobb.denied.se",
       "custom_domain": true
     }
-  ],
-  "observability": {
-    "logs": {
-      "enabled": true,
-      "head_sampling_rate": 1,
-      "invocation_logs": true,
-      "persist": true
-    },
-    "traces": {
-      "enabled": false,
-      "head_sampling_rate": 1,
-      "persist": true
-    }
-  }
+  ]
 }

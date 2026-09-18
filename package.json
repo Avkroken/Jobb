@@ -9,9 +9,10 @@
     "test": "pnpm -r test",
     "dev": "pnpm --filter @avkroken/web dev",
     "deploy": "pnpm --filter @avkroken/web deploy",
-    "deploy:cloudflare": "pnpm --filter @avkroken/web exec wrangler d1 migrations apply DB --remote && pnpm --filter @avkroken/web exec wrangler deploy"
+    "deploy:cloudflare": "pnpm --filter @avkroken/web exec wrangler d1 migrations apply DB --remote --config ../../wrangler.jsonc && pnpm --filter @avkroken/web exec wrangler deploy --config ../../wrangler.jsonc"
   },
   "devDependencies": {
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "wrangler": "^4.40.0"
   }
 }
