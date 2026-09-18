@@ -28,7 +28,7 @@ import {
 
 export { JobAutomationWorkflow };
 
-export interface Env extends AutomationEnv, DashboardAuthEnv {
+export interface Env extends AutomationEnv, DashboardAuthEnv, TurnstileEnv {
   DB: D1Database;
   EVIDENCE: R2Bucket;
   BROWSER: BrowserWorker;
