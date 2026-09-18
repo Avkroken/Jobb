@@ -97,9 +97,13 @@ The application can start and retain an Arbetsförmedlingen browser session and 
 
 While a handoff is active, the dashboard polls the authenticated session. After BankID succeeds, a fail-closed integration probe navigates to the activity report and stores its **form schema**, not the user's entered values. The probe records items such as headings, input/select/button names, control types, list options and sanitized link paths. It never reads or stores input values.
 
-The probe exists because the authenticated activity-report form is not publicly documented as a write API. Its captured schema is used to implement and test the final adapter against the real service rather than guessing private endpoints or selectors.
+The probe exists because the authenticated activity-report form is not publicly documented as a write API. The report adapter uses semantic labels/roles and the verified probe instead of guessing private endpoints.
 
-Since June 2026, Arbetsförmedlingen can also require answers to activities transferred from the user's handlingsplan. The automation must only answer such questions when the answer can be established from data available to the application; otherwise it must fail closed rather than inventing an answer.
+After a successful BankID login, the adapter loads exactly ten verified applications from the previous month. It validates the application dates in Europe/Stockholm, includes the StudentConsulting Jobb-ID together with the employer name, resolves occupations through JobTech Taxonomy, marks international applications as outside Sweden, and fills Swedish locations through the structured location control.
+
+Each activity is idempotent: D1 persists `pending → save_attempted → saved` before/after the external Save side effect. If Save returns an ambiguous result, the next pass first checks whether the exact Jobb-ID is already present and never blindly clicks Save again. The final report submission uses the same rule: `reports.status='submitting'` is persisted before the external submit click; later retries verify confirmation instead of resubmitting.
+
+Since June 2026, Arbetsförmedlingen can also require answers to activities transferred from the user's handlingsplan. The automation does **not** invent those answers. Any unresolved required question leaves the Browser Run session available in the dashboard for the user; after the user answers, polling resumes the same report flow.
 
 ## D1 migrations
 
@@ -110,6 +114,7 @@ migrations/0001_initial.sql
 migrations/0002_automation.sql
 migrations/0003_integration_probes.sql
 migrations/0004_monthly_application_quota.sql
+migrations/0005_activity_report_submission.sql
 ```
 
 `0002_automation.sql` adds workflow/run state, notification history, BankID handoff metadata, and links applications to their automation run.
@@ -117,3 +122,6 @@ migrations/0004_monthly_application_quota.sql
 `0003_integration_probes.sql` stores metadata for sanitized authenticated integration probes. Full probe documents are kept in the private R2 evidence bucket.
 
 `0004_monthly_application_quota.sql` enforces the ten-slot monthly submission ceiling.
+
+
+`0005_activity_report_submission.sql` tracks idempotent Arbetsförmedlingen activity-item saves so browser/network ambiguity cannot cause duplicate reporting actions.
