@@ -36,7 +36,6 @@ export class JobAutomationWorkflow extends WorkflowEntrypoint<
         executeAutomation(this.env, {
           mode: trigger.mode,
           runId: trigger.runId,
-          now: new Date(trigger.triggeredAt),
         }),
     );
 
