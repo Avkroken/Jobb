@@ -3,17 +3,30 @@
   "name": "jobb",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-17",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "upload_source_maps": true,
-  "browser": { "binding": "BROWSER" },
+  "browser": {
+    "binding": "BROWSER"
+  },
   "d1_databases": [
-    { "binding": "DB", "database_name": "jobb" }
+    {
+      "binding": "DB",
+      "database_name": "jobb",
+      "migrations_dir": "../../migrations"
+    }
   ],
   "r2_buckets": [
-    { "binding": "EVIDENCE", "bucket_name": "jobb-evidence" }
+    {
+      "binding": "EVIDENCE",
+      "bucket_name": "jobb-evidence"
+    }
   ],
   "send_email": [
-    { "name": "EMAIL" }
+    {
+      "name": "EMAIL"
+    }
   ],
   "workflows": [
     {
@@ -23,6 +36,14 @@
     }
   ],
   "triggers": {
-    "crons": ["0 9 10-13 * *"]
-  }
+    "crons": [
+      "0 9 10-13 * *"
+    ]
+  },
+  "routes": [
+    {
+      "pattern": "jobb.denied.se",
+      "custom_domain": true
+    }
+  ]
 }
