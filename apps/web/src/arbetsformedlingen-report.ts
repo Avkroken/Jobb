@@ -555,16 +555,17 @@ async function fillStructuredField(
   field: Locator,
   value: string,
 ): Promise<boolean> {
-  const tag = await field.getAttribute("role");
-  const htmlTag = await field.getAttribute("data-tag");
-
-  if (tag === "combobox") {
-    await field.fill(value);
-  } else if (htmlTag === "select") {
-    return false;
-  } else {
-    await field.fill(value);
+  const nativeOptions = field.locator("option");
+  if ((await nativeOptions.count()) > 0) {
+    try {
+      await field.selectOption({ label: value });
+      return true;
+    } catch {
+      return false;
+    }
   }
+
+  await field.fill(value);
 
   await page.waitForTimeout(350);
 
@@ -700,7 +701,7 @@ async function findUnresolvedMandatoryQuestions(
     const fieldset = fieldsets.nth(index);
     if (!(await fieldset.isVisible())) continue;
     const text = (await safeInnerText(fieldset)).trim();
-    if (!/obligatorisk|?$|handlingsplan|rekommenderad aktivitet/i.test(text)) {
+    if (!/obligatorisk|\\?$|handlingsplan|rekommenderad aktivitet/i.test(text)) {
       continue;
     }
 
