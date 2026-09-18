@@ -5,6 +5,11 @@ DASHBOARD_USERNAME="admin"
 DASHBOARD_PASSWORD="replace-with-a-long-random-password"
 PUBLIC_BASE_URL="https://jobb.example.com"
 
+# Turnstile protects user-triggered dashboard actions.
+# In production TURNSTILE_SECRET must be stored as a Worker secret, not in Git.
+TURNSTILE_SECRET="replace-with-turnstile-secret"
+TURNSTILE_HOSTNAMES="localhost,127.0.0.1"
+
 # StudentConsulting runtime credentials
 STUDENTCONSULTING_EMAIL="user@example.com"
 STUDENTCONSULTING_PASSWORD="replace-me"
