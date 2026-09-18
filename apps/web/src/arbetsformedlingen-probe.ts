@@ -80,7 +80,7 @@ export async function captureArbetsformedlingenActivityReportProbe(
   }
 }
 
-async function navigateToActivityReport(page: Page): Promise<void> {
+export async function navigateToActivityReport(page: Page): Promise<void> {
   if (/aktivitetsrapport/i.test(page.url())) return;
 
   const linkCandidates = page.getByRole("link", {
@@ -106,7 +106,7 @@ async function navigateToActivityReport(page: Page): Promise<void> {
   );
 }
 
-async function waitForActivityReportForm(page: Page): Promise<void> {
+export async function waitForActivityReportForm(page: Page): Promise<void> {
   await waitForActivityReportContext(page, 15_000);
   if (await hasMeaningfulFormControls(page)) return;
 
@@ -177,7 +177,7 @@ async function hasMeaningfulFormControls(page: Page): Promise<boolean> {
   return false;
 }
 
-async function uniqueVisible(locator: Locator, limit: number): Promise<Locator | null> {
+export async function uniqueVisible(locator: Locator, limit: number): Promise<Locator | null> {
   const count = Math.min(await locator.count(), limit);
   const visible: Locator[] = [];
   for (let index = 0; index < count; index += 1) {
@@ -249,7 +249,7 @@ async function collectTexts(locator: Locator, limit: number): Promise<string[]> 
   return output;
 }
 
-async function safeInnerText(locator: Locator): Promise<string> {
+export async function safeInnerText(locator: Locator): Promise<string> {
   try {
     return await locator.innerText();
   } catch {

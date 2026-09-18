@@ -45,6 +45,17 @@ export async function getDashboardData(
     .bind(reportMonth)
     .first();
 
+  const reportItems = await db
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN state = 'saved' THEN 1 ELSE 0 END) AS saved,
+         COUNT(*) AS total
+       FROM report_activity_items
+       WHERE report_month = ?`,
+    )
+    .bind(reportMonth)
+    .first<{ saved: number | null; total: number }>();
+
   const runs = await db
     .prepare(
       `SELECT r.id, r.mode, r.application_month, r.report_month, r.status,
@@ -89,6 +100,8 @@ export async function getDashboardData(
     quotaUsed: Number(quota?.occupied ?? 0),
     applicationWindowOpen: isApplicationAutomationWindow(),
     report: report ?? null,
+    reportSaved: Number(reportItems?.saved ?? 0),
+    reportItems: Number(reportItems?.total ?? 0),
     runs: runs.results,
     applications: applications.results,
     configuration: {
@@ -156,16 +169,16 @@ async function load(){
   var d=await api('/api/dashboard');
   var remaining=Math.max(0,d.target-d.verified);
   var cfg=d.configuration;
-  var active=d.runs.find(function(r){return r.status==='needs_user_auth'&&r.auth_live_view_url&&r.probe_status!=='captured';});
+  var active=d.runs.find(function(r){return r.status==='needs_user_auth'&&r.auth_live_view_url;});
   var mapped=d.runs.find(function(r){return r.probe_status==='captured';});
   var html='<div class="grid">';
   html+='<section class="card"><h2>'+esc(d.applicationMonth)+'</h2><div class="big">'+d.verified+'/'+d.target+'</div><progress max="'+d.target+'" value="'+d.verified+'"></progress><p class="muted">'+remaining+' verifierade återstår · '+esc(d.quotaUsed)+'/'+d.target+' slots upptagna</p></section>';
-  html+='<section class="card"><h2>Rapport '+esc(d.reportMonth)+'</h2>'+(d.report?badge(d.report.status):'<span class="muted">Inte skapad än</span>')+'<p class="error">'+esc(d.report&&d.report.last_error||'')+'</p></section>';
+  html+='<section class="card"><h2>Rapport '+esc(d.reportMonth)+'</h2>'+(d.report?badge(d.report.status):'<span class="muted">Inte skapad än</span>')+'<p>'+esc(d.reportSaved)+'/'+esc(d.target)+' aktiviteter verifierat sparade</p><p class="error">'+esc(d.report&&d.report.last_error||'')+'</p></section>';
   html+='<section class="card"><h2>Konfiguration</h2><div>'+(cfg.studentConsultingCredentials?'✅':'❌')+' StudentConsulting-konto</div><div>'+(cfg.studentConsultingAutoSubmit?'✅':'❌')+' Autosubmit</div><div>'+(cfg.suitabilityPolicy?'✅':'❌')+' Lämplighetsregler</div><div>'+(cfg.bankIdNotification?'✅':'❌')+' BankID-notifiering</div></section></div>';
   var manual=document.getElementById('manual');if(manual){manual.disabled=!d.applicationWindowOpen;manual.title=d.applicationWindowOpen?'':'Jobbautomation är stängd den 15:e–månadens slut.';}
   if(!d.applicationWindowOpen){document.getElementById('manualResult').textContent=' Stängt 15:e–månadens slut.';}
-  if(active){html+='<section class="card bankid"><h2>BankID krävs</h2><p>Körning <code>'+esc(active.id)+'</code> väntar på legitimering eller formulärkartläggning. Dashboarden försöker automatiskt igen efter tillfälliga probe-fel.</p><div class="toolbar"><a class="button" target="_blank" rel="noopener noreferrer" href="'+esc(active.auth_live_view_url)+'">Öppna BankID-flödet</a></div><p class="muted">Sessionen löper ut '+esc(active.auth_expires_at)+'</p><p class="error">'+esc(active.probe_error||'')+'</p></section>';setTimeout(function(){autoCheckBankId(active.id);},1000);}
-  if(mapped){html+='<section class="card"><h2>Arbetsförmedlingen</h2><div class="status ok">BankID verifierat · formulärschema kartlagt</div><p class="muted">Proben sparar bara struktur och inga ifyllda fältvärden.</p></section>';}
+  if(active){html+='<section class="card bankid"><h2>Arbetsförmedlingen kräver din uppmärksamhet</h2><p>Körning <code>'+esc(active.id)+'</code> väntar på BankID, en obligatorisk fråga eller verifiering av en osäker sparning. Dashboarden fortsätter automatiskt när det går säkert.</p><div class="toolbar"><a class="button" target="_blank" rel="noopener noreferrer" href="'+esc(active.auth_live_view_url)+'">Öppna Arbetsförmedlingen / BankID</a></div><p class="muted">Sessionen löper ut '+esc(active.auth_expires_at)+'</p><p class="error">'+esc(active.last_error||active.probe_error||'')+'</p></section>';setTimeout(function(){autoCheckBankId(active.id);},1000);}
+  if(mapped){html+='<section class="card"><h2>Arbetsförmedlingen</h2><div class="status ok">Formulärschema verifierat</div><p class="muted">Rapportadaptern fyller endast verifierade ansökningar och skickar inte vidare om ett obligatoriskt svar är osäkert.</p></section>';}
   html+='<section class="card"><h2>Senaste ansökningar</h2><table><thead><tr><th>Status</th><th>Jobb</th><th>Ort</th><th>Datum</th><th>Fel – var och varför</th></tr></thead><tbody>'+d.applications.map(applicationRow).join('')+'</tbody></table></section>';
   html+='<section class="card"><h2>Senaste körningar</h2><table><thead><tr><th>Läge</th><th>Status</th><th>Månad</th><th>Verifierade</th><th>AF-probe</th><th>Fel</th></tr></thead><tbody>'+d.runs.map(runRow).join('')+'</tbody></table></section>';
   document.getElementById('content').innerHTML=html;
