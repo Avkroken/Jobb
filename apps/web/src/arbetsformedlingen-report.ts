@@ -767,9 +767,7 @@ async function pageContainsExactJobId(
   externalId: string,
 ): Promise<boolean> {
   const text = await safeInnerText(page.locator("main").first());
-  return new RegExp(
-    "(?:^|\\D)" + escapeRegExp(externalId) + "(?:\\D|$)",
-  ).test(text);
+  return containsExactJobId(text, externalId);
 }
 
 async function verifyReportSubmissionConfirmation(
