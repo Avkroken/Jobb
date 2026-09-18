@@ -8,7 +8,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "dev": "pnpm --filter @avkroken/web dev",
-    "deploy": "pnpm --filter @avkroken/web deploy"
+    "deploy": "pnpm --filter @avkroken/web deploy",
+    "deploy:cloudflare": "pnpm --filter @avkroken/web exec wrangler d1 migrations apply DB --remote && pnpm --filter @avkroken/web exec wrangler deploy"
   },
   "devDependencies": {
     "typescript": "^5.9.2"

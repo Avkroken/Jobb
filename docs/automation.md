@@ -125,3 +125,24 @@ migrations/0005_activity_report_submission.sql
 
 
 `0005_activity_report_submission.sql` tracks idempotent Arbetsförmedlingen activity-item saves so browser/network ambiguity cannot cause duplicate reporting actions.
+
+
+## Cloudflare deployment
+
+Production deployment uses **Cloudflare Workers Builds with the GitHub integration**, not GitHub Actions credentials.
+
+GitHub does not require `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID`.
+
+Recommended Workers Builds settings:
+
+```text
+Git repository: Avkroken/Jobb
+Production branch: main
+Root directory: /
+Build command: pnpm install --frozen-lockfile && pnpm typecheck && pnpm test
+Deploy command: pnpm deploy:cloudflare
+```
+
+The production deploy command applies D1 migrations first and then runs Wrangler deploy. Cloudflare authenticates the build through its own Git integration.
+
+The Worker configuration publishes the custom domain `jobb.denied.se` and binds Browser Run, D1, R2, Email, Workflow and Cron resources.
