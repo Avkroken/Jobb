@@ -68,4 +68,5 @@ jobs:
 
       - name: Report production domain
         if: always()
-        run: echo "Custom domain: https://jobb.denied.se"
+        run: |
+          echo "Custom domain: https://jobb.denied.se"
