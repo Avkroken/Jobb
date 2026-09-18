@@ -1,5 +1,6 @@
 import type { BrowserWorker } from "@cloudflare/playwright";
 import { getArbetsformedlingenHandoffStatus } from "./arbetsformedlingen-handoff";
+import { submitArbetsformedlingenActivityReport } from "./arbetsformedlingen-report";
 import { requireDashboardAuth, type DashboardAuthEnv } from "./auth";
 import {
   type AutomationWorkflowParams,
@@ -20,6 +21,7 @@ import {
 } from "./storage";
 import {
   currentMonthKey,
+  isActivityReportWindow,
   isApplicationAutomationWindow,
   isScheduledSafetyWindow,
 } from "./time";
@@ -98,7 +100,7 @@ export default {
     }
 
     const bankIdMatch = url.pathname.match(
-      /^\/api\/runs\/([^/]+)\/bankid\/check$/,
+      /^\\/api\\/runs\\/([^/]+)\\/bankid\\/check$/,
     );
     if (request.method === "POST" && bankIdMatch) {
       const runId = decodeURIComponent(bankIdMatch[1]);
@@ -110,36 +112,17 @@ export default {
           { status: 409 },
         );
       }
+      if (!isActivityReportWindow(new Date())) {
+        return Response.json(
+          {
+            error:
+              "Aktivitetsrapporten får bara automatiseras under rapportfönstret 1:a–14:e (Europe/Stockholm).",
+          },
+          { status: 409 },
+        );
+      }
 
       try {
-        const existingProbe = await getIntegrationProbe(env.DB, runId);
-        if (existingProbe?.status === "captured") {
-          await finalizeProbeDiscovery(env, run);
-          return Response.json({
-            authenticated: true,
-            runId,
-            probe: {
-              probeId: existingProbe.id,
-              status: "captured",
-              pageUrl: existingProbe.page_url,
-              summary: existingProbe.summary_json
-                ? JSON.parse(existingProbe.summary_json)
-                : null,
-            },
-            message:
-              "BankID och aktivitetsrapportens formulärschema är redan verifierade.",
-          });
-        }
-
-        if (existingProbe?.status === "capturing") {
-          return Response.json({
-            authenticated: true,
-            runId,
-            probe: { probeId: existingProbe.id, status: "capturing" },
-            message: "Aktivitetsrapportens formulärschema kartläggs redan.",
-          });
-        }
-
         const status = await getArbetsformedlingenHandoffStatus(
           env.BROWSER,
           run.auth_session_id,
@@ -152,26 +135,61 @@ export default {
           });
         }
 
-        const probe = await captureAndPersistActivityReportProbe(
-          env,
-          runId,
-          run.auth_session_id,
-        );
-
-        if (probe.status === "captured") {
-          await finalizeProbeDiscovery(env, run);
+        let probe = await getIntegrationProbe(env.DB, runId);
+        if (!probe || probe.status === "failed") {
+          const captured = await captureAndPersistActivityReportProbe(
+            env,
+            runId,
+            run.auth_session_id,
+          );
+          if (captured.status !== "captured") {
+            return Response.json({
+              ...status,
+              runId,
+              probe: captured,
+              message:
+                captured.status === "capturing"
+                  ? "Aktivitetsrapportens formulärschema kartläggs redan."
+                  : "Formulärkartläggningen misslyckades och kan köras om.",
+            });
+          }
+          probe = await getIntegrationProbe(env.DB, runId);
         }
+
+        if (probe?.status === "capturing") {
+          return Response.json({
+            ...status,
+            runId,
+            probe: { probeId: probe.id, status: "capturing" },
+            message: "Aktivitetsrapportens formulärschema kartläggs redan.",
+          });
+        }
+        if (!probe || probe.status !== "captured") {
+          return Response.json({
+            ...status,
+            runId,
+            message:
+              "Aktivitetsrapportens formulärschema är ännu inte verifierat.",
+          });
+        }
+
+        const report = await submitArbetsformedlingenActivityReport(
+          env,
+          run.auth_session_id,
+          run.report_month,
+        );
+        await applyActivityReportResult(env, run, report);
 
         return Response.json({
           ...status,
           runId,
-          probe,
-          message:
-            probe.status === "captured"
-              ? "BankID är verifierat och aktivitetsrapportens formulärschema är kartlagt utan fältvärden."
-              : probe.status === "capturing"
-                ? "BankID är verifierat och formulärproben kör redan."
-                : "BankID är verifierat men formulärproben misslyckades och kommer att kunna köras om.",
+          probe: {
+            probeId: probe.id,
+            status: probe.status,
+            pageUrl: probe.page_url,
+          },
+          report,
+          message: activityReportMessage(report),
         });
       } catch (error) {
         return jsonError(error, 502);
@@ -217,19 +235,72 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function finalizeProbeDiscovery(
+async function applyActivityReportResult(
   env: Env,
   run: AutomationRunRow,
+  result: Awaited<ReturnType<typeof submitArbetsformedlingenActivityReport>>,
 ): Promise<void> {
-  await setReportStatus(env.DB, run.report_month, "ready");
+  if (result.status === "submitted") {
+    await updateRun(env.DB, run.id, {
+      status: "completed",
+      completedAt: new Date().toISOString(),
+      lastError: null,
+      authSessionId: null,
+      authLiveViewUrl: null,
+      authExpiresAt: null,
+    });
+    return;
+  }
+
+  if (result.status === "needs_user_action") {
+    const message = result.issues.join(" | ");
+    await setReportStatus(env.DB, run.report_month, "needs_user_auth", message);
+    await updateRun(env.DB, run.id, {
+      status: "needs_user_auth",
+      lastError: message,
+    });
+    return;
+  }
+
+  if (result.status === "unknown") {
+    await env.DB
+      .prepare(
+        "UPDATE reports SET last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE report_month = ?",
+      )
+      .bind(result.error, run.report_month)
+      .run();
+    await updateRun(env.DB, run.id, {
+      status: "needs_user_auth",
+      lastError: result.error,
+    });
+    return;
+  }
+
+  await setReportStatus(env.DB, run.report_month, "failed", result.error);
   await updateRun(env.DB, run.id, {
-    status: "completed",
+    status: "failed",
     completedAt: new Date().toISOString(),
-    lastError: null,
+    lastError: result.error,
     authSessionId: null,
     authLiveViewUrl: null,
     authExpiresAt: null,
   });
+}
+
+function activityReportMessage(
+  result: Awaited<ReturnType<typeof submitArbetsformedlingenActivityReport>>,
+): string {
+  switch (result.status) {
+    case "submitted":
+      return "Aktivitetsrapporten är verifierat inskickad.";
+    case "needs_user_action":
+      return "BankID är verifierat men rapporten behöver användaråtgärd: " +
+        result.issues.join(" | ");
+    case "unknown":
+      return result.error;
+    case "failed":
+      return result.error;
+  }
 }
 
 function integerParam(value: string | null, fallback: number): number {
