@@ -3,7 +3,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE monthly_application_slots (
   report_month TEXT NOT NULL,
   slot_no INTEGER NOT NULL CHECK (slot_no BETWEEN 1 AND 10),
-  application_id TEXT UNIQUE REFERENCES applications(id),
+  application_id TEXT UNIQUE,
   reservation_owner TEXT,
   state TEXT NOT NULL DEFAULT 'free'
     CHECK (state IN ('free','reserved','submitted','verified','uncertain')),
