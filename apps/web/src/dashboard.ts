@@ -138,7 +138,7 @@ const DASHBOARD_HTML = `<!doctype html>
 <h1>Jobbautomation</h1>
 <div class="muted">Exakt 10 slots per månad · StudentConsulting → Arbetsförmedlingen</div>
 <div class="grid">
-<section class="card"><h2>Manuellt läge</h2><p>Startar samma pipeline direkt. Jobbansökningar är endast tillåtna den 1:a–14:e varje månad.</p><button id="manual">Kör nu</button> <span id="manualResult" class="muted"></span></section>
+<section class="card"><h2>Manuellt läge</h2><p>Startar samma pipeline direkt. Jobbansökningar är endast tillåtna den 1:a–14:e varje månad.</p><button id="manual" disabled>Kör nu</button> <span id="manualResult" class="muted"></span></section>
 <section class="card"><h2>Automatiskt säkerhetsläge</h2><div class="status ok">Aktivt</div><p>En körning per dag den 10:e–13:e, inom 10:00–20:00 svensk tid.</p><p class="muted">Dag 10 gör huvudförsöket. Dag 11–13 används bara om den gemensamma månadskörningen fortfarande är failed. Ingen jobbsökning den 15:e–31:e.</p></section>
 </div>
 <div id="content"><div class="card">Laddar…</div></div>
