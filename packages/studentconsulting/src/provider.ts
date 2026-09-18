@@ -260,9 +260,14 @@ export class StudentConsultingProvider implements JobProvider {
         };
       }
 
-      // noWaitAfter makes a successful return mean the click itself was dispatched;
-      // any later navigation/verification failure is therefore post-submit uncertainty.
-      await submit.click({ timeout: 10_000, noWaitAfter: true });
+      // Dispatch the already-validated unique submit control directly so a
+      // successful return means the external click side effect was emitted.
+      await submit.evaluate((element) => {
+        if (!(element instanceof HTMLElement)) {
+          throw new Error("APPLICATION_SUBMIT_INVALID: submit control is not an HTMLElement.");
+        }
+        element.click();
+      });
       submissionAttempted = true;
       await waitForSubmissionToSettle(this.page, SUBMISSION_SETTLE_MS);
 
