@@ -130,7 +130,7 @@ export function renderDashboard(): Response {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
       "content-security-policy":
-        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        "default-src 'self'; script-src 'unsafe-inline' https://challenges.cloudflare.com; style-src 'unsafe-inline'; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
       "x-content-type-options": "nosniff",
       "referrer-policy": "no-referrer",
     },
@@ -151,12 +151,19 @@ const DASHBOARD_HTML = `<!doctype html>
 <h1>Jobbautomation</h1>
 <div class="muted">Exakt 10 slots per månad · StudentConsulting → Arbetsförmedlingen</div>
 <div class="grid">
-<section class="card"><h2>Manuellt läge</h2><p>Startar samma pipeline direkt. Jobbansökningar är endast tillåtna den 1:a–14:e varje månad.</p><button id="manual" disabled>Kör nu</button> <span id="manualResult" class="muted"></span></section>
+<section class="card"><h2>Manuellt läge</h2><p>Startar samma pipeline direkt. Jobbansökningar är endast tillåtna den 1:a–14:e varje månad.</p><div id="turnstile"></div><button id="manual" disabled>Kör nu</button> <span id="manualResult" class="muted"></span></section>
 <section class="card"><h2>Automatiskt säkerhetsläge</h2><div class="status ok">Aktivt</div><p>En körning per dag den 10:e–13:e, inom 10:00–20:00 svensk tid.</p><p class="muted">Dag 10 gör huvudförsöket. Dag 11–13 används bara om den gemensamma månadskörningen fortfarande är failed. Ingen jobbsökning den 15:e–31:e.</p></section>
 </div>
 <div id="content"><div class="card">Laddar…</div></div>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 <script>
 var bankCheckInFlight=false;
+var turnstileWidgetId=null;
+var turnstileToken='';
+var applicationWindowOpen=false;
+function syncManualButton(){var button=document.getElementById('manual');if(button){button.disabled=!applicationWindowOpen||!turnstileToken;}}
+function renderTurnstile(){if(turnstileWidgetId!==null||!window.turnstile)return;turnstileWidgetId=window.turnstile.render('#turnstile',{sitekey:'0x4AAAAAADtfk0hF05HrDLLJ',action:'manual_run',callback:function(token){turnstileToken=token;syncManualButton();},'expired-callback':function(){turnstileToken='';syncManualButton();},'error-callback':function(){turnstileToken='';syncManualButton();}});}
+function resetTurnstile(){turnstileToken='';if(turnstileWidgetId!==null&&window.turnstile){window.turnstile.reset(turnstileWidgetId);}syncManualButton();}
 function esc(value){return String(value==null?'':value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 async function api(path,options){var response=await fetch(path,options);if(!response.ok)throw new Error(await response.text());return response.json();}
 function badge(status){var cls=status==='verified'||status==='completed'||status==='submitted'||status==='captured'?'ok':status==='failed'?'bad':'warn';return '<span class="status '+cls+'">'+esc(status)+'</span>';}
@@ -175,7 +182,7 @@ async function load(){
   html+='<section class="card"><h2>'+esc(d.applicationMonth)+'</h2><div class="big">'+d.verified+'/'+d.target+'</div><progress max="'+d.target+'" value="'+d.verified+'"></progress><p class="muted">'+remaining+' verifierade återstår · '+esc(d.quotaUsed)+'/'+d.target+' slots upptagna</p></section>';
   html+='<section class="card"><h2>Rapport '+esc(d.reportMonth)+'</h2>'+(d.report?badge(d.report.status):'<span class="muted">Inte skapad än</span>')+'<p>'+esc(d.reportSaved)+'/'+esc(d.target)+' aktiviteter verifierat sparade</p><p class="error">'+esc(d.report&&d.report.last_error||'')+'</p></section>';
   html+='<section class="card"><h2>Konfiguration</h2><div>'+(cfg.studentConsultingCredentials?'✅':'❌')+' StudentConsulting-konto</div><div>'+(cfg.studentConsultingAutoSubmit?'✅':'❌')+' Autosubmit</div><div>'+(cfg.suitabilityPolicy?'✅':'❌')+' Lämplighetsregler</div><div>'+(cfg.bankIdNotification?'✅':'❌')+' BankID-notifiering</div></section></div>';
-  var manual=document.getElementById('manual');if(manual){manual.disabled=!d.applicationWindowOpen;manual.title=d.applicationWindowOpen?'':'Jobbautomation är stängd den 15:e–månadens slut.';}
+  applicationWindowOpen=d.applicationWindowOpen;var manual=document.getElementById('manual');if(manual){manual.title=d.applicationWindowOpen?'':'Jobbautomation är stängd den 15:e–månadens slut.';syncManualButton();}
   if(!d.applicationWindowOpen){document.getElementById('manualResult').textContent=' Stängt 15:e–månadens slut.';}
   if(active){html+='<section class="card bankid"><h2>Arbetsförmedlingen kräver din uppmärksamhet</h2><p>Körning <code>'+esc(active.id)+'</code> väntar på BankID, en obligatorisk fråga eller verifiering av en osäker sparning. Dashboarden fortsätter automatiskt när det går säkert.</p><div class="toolbar"><a class="button" target="_blank" rel="noopener noreferrer" href="'+esc(active.auth_live_view_url)+'">Öppna Arbetsförmedlingen / BankID</a></div><p class="muted">Sessionen löper ut '+esc(active.auth_expires_at)+'</p><p class="error">'+esc(active.last_error||active.probe_error||'')+'</p></section>';setTimeout(function(){autoCheckBankId(active.id);},1000);}
   if(mapped){html+='<section class="card"><h2>Arbetsförmedlingen</h2><div class="status ok">Formulärschema verifierat</div><p class="muted">Rapportadaptern fyller endast verifierade ansökningar och skickar inte vidare om ett obligatoriskt svar är osäkert.</p></section>';}
@@ -184,7 +191,8 @@ async function load(){
   document.getElementById('content').innerHTML=html;
  }catch(error){document.getElementById('content').innerHTML='<div class="card bad">'+esc(error.message)+'</div>';}
 }
-document.getElementById('manual').onclick=async function(){var button=document.getElementById('manual');var out=document.getElementById('manualResult');button.disabled=true;out.textContent=' Startar…';try{var result=await api('/api/runs/manual',{method:'POST'});out.textContent=' Startad: '+result.runId;setTimeout(load,1500);}catch(error){out.textContent=' '+error.message;}finally{setTimeout(load,100);}};
+document.getElementById('manual').onclick=async function(){var button=document.getElementById('manual');var out=document.getElementById('manualResult');if(!turnstileToken)return;button.disabled=true;out.textContent=' Startar…';try{var result=await api('/api/runs/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({turnstileToken:turnstileToken})});out.textContent=' Startad: '+result.runId;setTimeout(load,1500);}catch(error){out.textContent=' '+error.message;}finally{resetTurnstile();setTimeout(load,100);}};
+var turnstileWait=setInterval(function(){if(window.turnstile){clearInterval(turnstileWait);renderTurnstile();}},100);
 load();setInterval(load,10000);
 </script>
 </body>
