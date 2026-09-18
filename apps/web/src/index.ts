@@ -100,7 +100,7 @@ export default {
     }
 
     const bankIdMatch = url.pathname.match(
-      /^\\/api\\/runs\\/([^/]+)\\/bankid\\/check$/,
+      /^\/api\/runs\/([^/]+)\/bankid\/check$/,
     );
     if (request.method === "POST" && bankIdMatch) {
       const runId = decodeURIComponent(bankIdMatch[1]);
