@@ -701,7 +701,10 @@ async function findUnresolvedMandatoryQuestions(
     const fieldset = fieldsets.nth(index);
     if (!(await fieldset.isVisible())) continue;
     const text = (await safeInnerText(fieldset)).trim();
-    if (!/obligatorisk|\\?$|handlingsplan|rekommenderad aktivitet/i.test(text)) {
+    if (
+      !/obligatorisk|handlingsplan|rekommenderad aktivitet/i.test(text) &&
+      !text.endsWith("?")
+    ) {
       continue;
     }
 
