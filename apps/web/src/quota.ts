@@ -11,6 +11,7 @@ export interface MonthlySlotClaim {
   reportMonth: string;
   slotNo: number;
   applicationId: string;
+  reservationOwner: string;
   state: MonthlySlotState;
 }
 
@@ -30,48 +31,104 @@ export async function ensureMonthlyApplicationSlots(
         .bind(reportMonth, index + 1),
   );
   await db.batch(statements);
+
+  // A crash before the application row is created cannot have reached submit,
+  // so abandoned pre-submit reservations can safely be reclaimed after an hour.
+  await db
+    .prepare(
+      `UPDATE monthly_application_slots
+       SET application_id = NULL,
+           reservation_owner = NULL,
+           state = 'free',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE report_month = ?
+         AND state = 'reserved'
+         AND application_id IS NOT NULL
+         AND updated_at < datetime('now', '-1 hour')
+         AND NOT EXISTS (
+           SELECT 1 FROM applications a
+           WHERE a.id = monthly_application_slots.application_id
+         )`,
+    )
+    .bind(reportMonth)
+    .run();
 }
 
 /**
  * Reserve one of exactly ten monthly slots before any submit side effect.
- * D1 serializes the write statement; the follow-up SELECT confirms whether
- * this application won a slot. A previously claimed application is idempotent.
+ * reservationOwner is unique per application attempt so overlapping workflows
+ * can never release or mutate another attempt's slot.
  */
 export async function claimMonthlyApplicationSlot(
   db: D1Database,
   reportMonth: string,
   applicationId: string,
+  reservationOwner: string,
 ): Promise<MonthlySlotClaim | null> {
   await ensureMonthlyApplicationSlots(db, reportMonth);
 
   const existing = await getSlotForApplication(db, applicationId);
-  if (existing) return existing;
+  if (existing) {
+    return existing.reportMonth === reportMonth &&
+      existing.reservationOwner === reservationOwner
+      ? existing
+      : null;
+  }
 
+  try {
+    await db
+      .prepare(
+        `UPDATE monthly_application_slots
+         SET application_id = ?,
+             reservation_owner = ?,
+             state = 'reserved',
+             updated_at = CURRENT_TIMESTAMP
+         WHERE report_month = ?
+           AND slot_no = (
+             SELECT slot_no
+             FROM monthly_application_slots
+             WHERE report_month = ? AND state = 'free' AND application_id IS NULL
+             ORDER BY slot_no
+             LIMIT 1
+           )
+           AND state = 'free'
+           AND application_id IS NULL`,
+      )
+      .bind(applicationId, reservationOwner, reportMonth, reportMonth)
+      .run();
+  } catch {
+    // A concurrent claimant may have won either the same application_id or
+    // the selected slot. Read the winner below instead of propagating the race.
+  }
+
+  const won = await getSlotForApplication(db, applicationId);
+  return won &&
+    won.reportMonth === reportMonth &&
+    won.reservationOwner === reservationOwner
+    ? won
+    : null;
+}
+
+export async function setOwnedMonthlyApplicationSlotState(
+  db: D1Database,
+  applicationId: string,
+  reservationOwner: string,
+  state: Exclude<MonthlySlotState, "free" | "reserved">,
+): Promise<void> {
   await db
     .prepare(
       `UPDATE monthly_application_slots
-       SET application_id = ?, state = 'reserved', updated_at = CURRENT_TIMESTAMP
-       WHERE report_month = ?
-         AND slot_no = (
-           SELECT slot_no
-           FROM monthly_application_slots
-           WHERE report_month = ? AND state = 'free' AND application_id IS NULL
-           ORDER BY slot_no
-           LIMIT 1
-         )
-         AND state = 'free'
-         AND application_id IS NULL`,
+       SET state = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE application_id = ? AND reservation_owner = ?`,
     )
-    .bind(applicationId, reportMonth, reportMonth)
+    .bind(state, applicationId, reservationOwner)
     .run();
-
-  return getSlotForApplication(db, applicationId);
 }
 
-export async function setMonthlyApplicationSlotState(
+export async function reconcileMonthlyApplicationSlotState(
   db: D1Database,
   applicationId: string,
-  state: Exclude<MonthlySlotState, "free">,
+  state: "submitted" | "verified" | "uncertain",
 ): Promise<void> {
   await db
     .prepare(
@@ -83,18 +140,24 @@ export async function setMonthlyApplicationSlotState(
     .run();
 }
 
-/** Release only a reservation that is known not to have submitted anything. */
+/** Release only the reservation owned by this exact application attempt. */
 export async function releaseMonthlyApplicationSlot(
   db: D1Database,
   applicationId: string,
+  reservationOwner: string,
 ): Promise<void> {
   await db
     .prepare(
       `UPDATE monthly_application_slots
-       SET application_id = NULL, state = 'free', updated_at = CURRENT_TIMESTAMP
-       WHERE application_id = ? AND state = 'reserved'`,
+       SET application_id = NULL,
+           reservation_owner = NULL,
+           state = 'free',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE application_id = ?
+         AND reservation_owner = ?
+         AND state = 'reserved'`,
     )
-    .bind(applicationId)
+    .bind(applicationId, reservationOwner)
     .run();
 }
 
@@ -120,7 +183,7 @@ async function getSlotForApplication(
 ): Promise<MonthlySlotClaim | null> {
   const row = await db
     .prepare(
-      `SELECT report_month, slot_no, application_id, state
+      `SELECT report_month, slot_no, application_id, reservation_owner, state
        FROM monthly_application_slots
        WHERE application_id = ?
        LIMIT 1`,
@@ -130,14 +193,16 @@ async function getSlotForApplication(
       report_month: string;
       slot_no: number;
       application_id: string;
+      reservation_owner: string | null;
       state: MonthlySlotState;
     }>();
 
-  return row
+  return row && row.reservation_owner
     ? {
         reportMonth: row.report_month,
         slotNo: Number(row.slot_no),
         applicationId: row.application_id,
+        reservationOwner: row.reservation_owner,
         state: row.state,
       }
     : null;
