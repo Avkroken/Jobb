@@ -563,10 +563,6 @@ async function fillMonthlyApplicationTarget(
             "POST_VERIFICATION_ERROR",
             message,
           );
-          verifiedCount = await countVerifiedApplications(
-            env.DB,
-            applicationMonth,
-          );
           continue;
         }
 
