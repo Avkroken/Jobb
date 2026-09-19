@@ -9,11 +9,45 @@ on:
 permissions: {}
 
 jobs:
-  assign:
+  assign-issue:
+    if: ${{ github.event_name == 'issues' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Assign issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ASSIGNEE: blixten85
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -cn --arg assignee "$ASSIGNEE" '{assignees: [$assignee]}')"
+          gh api --method POST \
+            --header "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/assignees" \
+            --input - <<<"$payload" \
+            >/dev/null
+
+  assign-pull-request:
+    if: ${{ github.event_name == 'pull_request_target' }}
+    runs-on: ubuntu-latest
     permissions:
       issues: write
       pull-requests: write
-    # Immutable source workflow revision; update through review when central logic changes.
-    uses: Avkroken/.github/.github/workflows/reusable-auto-assign.yml@fdae2c7859b95cedd8df84ce1583ac420b66b7b7
-    with:
-      number: ${{ format('{0}', github.event.issue.number || github.event.pull_request.number) }}
+    steps:
+      - name: Assign pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.pull_request.number }}
+          ASSIGNEE: blixten85
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -cn --arg assignee "$ASSIGNEE" '{assignees: [$assignee]}')"
+          gh api --method POST \
+            --header "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/assignees" \
+            --input - <<<"$payload" \
+            >/dev/null
