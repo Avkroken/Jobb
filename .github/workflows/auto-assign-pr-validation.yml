@@ -1,0 +1,16 @@
+name: Auto assign PR-event validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  assign:
+    permissions:
+      issues: write
+      pull-requests: write
+    uses: Avkroken/.github/.github/workflows/reusable-auto-assign.yml@fdae2c7859b95cedd8df84ce1583ac420b66b7b7
+    with:
+      number: ${{ format('{0}', github.event.pull_request.number) }}
